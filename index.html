@@ -34,7 +34,7 @@
             <a class="button button-primary" href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Installation-Guide">Read the installation guide</a>
             <a class="button button-secondary" href="https://github.com/theGeeBee/NextcloudOnFreeBSD#readme">View the README</a>
           </div>
-          <p class="hero-note">Get the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.0">v1.0.0 release page</a>.</p>
+          <p class="hero-note">Get the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.0-20261116">v1.0.0 release page</a>.</p>
           <p class="platform">FreeBSD 15.1-RELEASE · amd64 · New installations</p>
         </div>
         <div class="logo-panel">
@@ -142,7 +142,7 @@
         <p>The wizard walks you through setup. Stay at your terminal to review settings and confirm network access.</p>
       </div>
       <ol class="steps">
-        <li><h3>Get the installer</h3><p>Download and unpack the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.0">v1.0.0 release page</a>. Keep its directory for Resume, recovery and removal.</p></li>
+        <li><h3>Get the installer</h3><p>Download and unpack the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.0-20261116">v1.0.0 release page</a>. Keep its directory for Resume, recovery and removal.</p></li>
         <li><h3>Choose your services</h3><p>Run this from the installer directory as root. The wizard covers storage, networking, HTTPS and applications, and asks before installing missing pkg/Python prerequisites.</p><pre><code>sh install.sh install</code></pre></li>
         <li><h3>Set up port forwarding</h3><p>Forward the selected web and Talk ports to the FreeBSD host, not its private jails or VM, using the values in your installation plan. An external HTTPS proxy changes the web route; follow the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Installation-Guide#port-forwarding">port-forwarding guide</a> for the details. The installer does not configure your router.</p></li>
         <li><h3>Review and install</h3><p>Check your settings and choose <code>APPLY</code>. When prompted, open a new SSH connection to check access, then enter <code>KEEP</code> before the timer expires.</p></li>
