@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "profile": "native-v1",
+  "target": {"release": "15.1-RELEASE", "architecture": "amd64"},
+  "nextcloud": {"family": "35"},
+  "php": {"family": "8.5"},
+  "push": {
+    "app": {
+      "version": "1.4.2",
+      "download": "https://github.com/nextcloud-releases/notify_push/releases/download/v1.4.2/notify_push-v1.4.2.tar.gz",
+      "sha256": "4bd2d62de2de3814e399297bc2443ed127a3ca730e540976a959c0b5a89cc380",
+      "size": 26025475,
+      "platformVersionSpec": ">=30.0.0 <36.0.0",
+      "phpVersionSpec": "*"
+    },
+    "native": {
+      "version": "1.4.2",
+      "url": "https://github.com/nextcloud/notify_push/releases/download/v1.4.2/notify_push-x86_64-unknown-freebsd",
+      "sha256": "96fb41c23a84e9524cf0d7272d6744645d06a4bfc60845e6dee7d2fa6e8f646a",
+      "size": 22800432,
+      "architecture": "amd64"
+    }
+  },
+  "talk": {
+    "roles": {
+      "talk_signaling": {"package": "nextcloud-spreed-signaling", "origin": "net-im/nextcloud-spreed-signaling"},
+      "talk_nats": {"package": "nats-server", "origin": "net/nats-server"},
+      "talk_janus": {"package": "janus", "origin": "www/janus"},
+      "talk_turn": {"package": "turnserver", "origin": "net/turnserver"},
+      "talk_python": {"package": "python3", "origin": "lang/python3", "range": {"family": "3"}}
+    }
+  }
+}

@@ -1,0 +1,43 @@
+### Derived from FreeBSD 15.1 / bsddialog 1.0.5 --theme flat --save-theme
+# Native eight-colour approximation; does not redefine terminal palette.
+version 1.0.5
+theme.screen.color white black
+theme.shadow.color black black
+theme.shadow.y 1
+theme.shadow.x 2
+theme.dialog.color white black
+theme.dialog.delimtitle true
+theme.dialog.titlecolor green black bold
+theme.dialog.lineraisecolor white black
+theme.dialog.linelowercolor white black
+theme.dialog.bottomtitlecolor green black
+theme.dialog.arrowcolor green black bold
+theme.menu.f_prefixcolor white black
+theme.menu.prefixcolor white black
+theme.menu.f_selectorcolor black green
+theme.menu.selectorcolor white black
+theme.menu.f_namecolor black green bold
+theme.menu.namecolor green black bold
+theme.menu.f_desccolor black green
+theme.menu.desccolor white black
+theme.menu.f_shortcutcolor black green bold
+theme.menu.shortcutcolor green black bold
+theme.menu.bottomdesccolor white black
+theme.menu.sepnamecolor green black bold
+theme.menu.sepdesccolor white black
+theme.form.f_fieldcolor black green
+theme.form.fieldcolor black white
+theme.form.readonlycolor white black
+theme.form.bottomdesccolor white black
+theme.bar.f_color black green bold
+theme.bar.color green black
+theme.button.minmargin 1
+theme.button.maxmargin 5
+theme.button.leftdelim [
+theme.button.rightdelim ]
+theme.button.f_delimcolor black green bold
+theme.button.delimcolor white black
+theme.button.f_color black green bold
+theme.button.color white black
+theme.button.f_shortcutcolor black green bold
+theme.button.shortcutcolor green black bold

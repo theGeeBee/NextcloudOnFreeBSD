@@ -1,0 +1,121 @@
+#!/bin/sh
+# PROVIDE: cloud_notify_push
+# REQUIRE: LOGIN mysql redis php_fpm apache24
+# KEYWORD: shutdown
+# Unwired component: install/review through the guarded NC worker before enabling.
+# FreeBSD 15.1 daemon: -P tracks ROOT supervisor; -u applies only to child.
+# Stop supervisor, never just the respawned child. No reload command is offered.
+
+. /etc/rc.subr
+
+name=cloud_notify_push
+rcvar=cloud_notify_push_enable
+command=/usr/sbin/daemon
+pidfile=/var/run/cloud-notify-push/supervisor.pid
+child_pidfile=/var/run/cloud-notify-push/child.pid
+start_cmd=cloud_notify_push_start
+stop_cmd=cloud_notify_push_stop
+restart_cmd=cloud_notify_push_restart
+
+cloud_notify_push_layout()
+{
+    # Reject replaced private directories/log/binary; never repair foreign paths.
+    for entry in \
+        /usr/local/libexec/cloud-installer:0:0:755 \
+        /var/run/cloud-notify-push:0:0:700 \
+        /var/log/cloud-notify-push:0:0:700 \
+        /var/log/cloud-notify-push/notify_push.log:0:0:600 \
+        /usr/local/libexec/cloud-installer/notify_push:0:0:555
+    do
+        path=${entry%%:*}
+        expected=${entry#*:}
+        [ ! -L "$path" ] && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$path" 2>/dev/null)" = "$expected" ] || return 1
+    done
+    [ -d /usr/local/libexec/cloud-installer ] &&
+        [ -d /var/run/cloud-notify-push ] &&
+        [ -d /var/log/cloud-notify-push ] &&
+        [ -f /var/log/cloud-notify-push/notify_push.log ] &&
+        [ -f /usr/local/libexec/cloud-installer/notify_push ] &&
+        [ ! -L "$pidfile" ] && [ ! -L "$child_pidfile" ]
+}
+
+cloud_notify_push_start()
+{
+    # /var/run is volatile. Recreate only our absent private directory; never
+    # chmod/chown an existing or symlinked path to make ownership checks pass.
+    if [ ! -e /var/run/cloud-notify-push ] && [ ! -L /var/run/cloud-notify-push ]; then
+        /usr/bin/install -d -o root -g wheel -m 700 /var/run/cloud-notify-push || return 1
+    fi
+    cloud_notify_push_layout || { warn 'Client Push private layout is invalid'; return 1; }
+    if [ -n "$(check_pidfile "$pidfile" "$command")" ]; then
+        warn 'Client Push supervisor is already running'
+        return 1
+    fi
+    if [ -n "$(check_process /usr/local/libexec/cloud-installer/notify_push)" ]; then
+        warn 'Client Push child exists without a verified supervisor'
+        return 1
+    fi
+    # Retained PID files may represent an interrupted supervisor or child. Do
+    # not truncate/adopt them; normal daemon termination removes both files.
+    if [ -e "$pidfile" ] || [ -e "$child_pidfile" ]; then
+        warn 'Client Push retained PID files require recovery assessment'
+        return 1
+    fi
+    # Clear inherited service/interactive environments for BOTH supervisor and
+    # child. LOGIN_SETALL in daemon -u may reset resource limits: set the hard
+    # and soft core limit again AFTER dropping privileges. No secret arguments.
+    (
+        umask 077
+        ulimit -c 0 || exit 1
+        exec /usr/bin/env -i PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin \
+            /usr/sbin/daemon -c -f -H -R 5 -C 3 \
+            -P "$pidfile" -p "$child_pidfile" -u www -m 3 \
+            -o /var/log/cloud-notify-push/notify_push.log \
+            /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin \
+            /bin/sh -c 'ulimit -c 0 || exit 1; exec /usr/local/libexec/cloud-installer/notify_push --bind 127.0.0.1 --port 7867 --nextcloud-url http://127.0.0.1:7868/ --log-level warn --no-ansi /usr/local/www/nextcloud/config/config.php'
+    )
+    # daemon detaching successfully is NOT application readiness. Worker must
+    # independently check TLS, WebSockets, exact version and supported self-test.
+}
+
+cloud_notify_push_stop()
+{
+    cloud_notify_push_layout || { warn 'Client Push private layout is invalid'; return 1; }
+    supervisor=$(check_pidfile "$pidfile" "$command")
+    if [ -z "$supervisor" ]; then
+        # A leftover PID file is uncertain, not permission to kill a guessed PID.
+        [ ! -e "$pidfile" ] || { warn 'Client Push supervisor identity is uncertain'; return 1; }
+        [ ! -e "$child_pidfile" ] || { warn 'Client Push retained child identity is uncertain'; return 1; }
+        [ -z "$(check_process /usr/local/libexec/cloud-installer/notify_push)" ] || {
+            warn 'Client Push child exists without a verified supervisor'; return 1;
+        }
+        return 0
+    fi
+    kill -TERM "$supervisor" || return 1
+    attempt=0
+    while [ "$attempt" -lt 30 ]; do
+        current=$(check_pidfile "$pidfile" "$command")
+        if [ -z "$current" ] && [ ! -e "$pidfile" ] && [ ! -e "$child_pidfile" ]; then
+            [ -z "$(check_process /usr/local/libexec/cloud-installer/notify_push)" ] || {
+                warn 'Client Push child survived its supervisor'; return 1;
+            }
+            return 0
+        fi
+        [ "$current" = "$supervisor" ] || { warn 'Client Push supervisor identity changed'; return 1; }
+        /bin/sleep 1
+        attempt=$((attempt + 1))
+    done
+    # Do not SIGKILL the supervisor and orphan its child, remove its PID file,
+    # or claim a quiesced application. Failed stop must block maintenance/restart.
+    warn 'Client Push stop timed out; retain state and inspect privately'
+    return 1
+}
+
+cloud_notify_push_restart()
+{
+    cloud_notify_push_stop && cloud_notify_push_start
+}
+
+load_rc_config "$name"
+: ${cloud_notify_push_enable:=NO}
+run_rc_command "$1"

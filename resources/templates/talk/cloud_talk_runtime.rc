@@ -1,0 +1,20 @@
+#!/bin/sh
+# PROVIDE: cloud_talk_runtime
+# REQUIRE: FILESYSTEMS NETWORKING syslogd
+# BEFORE: janus nats turnserver ncs_signaling
+# KEYWORD: shutdown
+# Only recreates volatile owned directories. Native service rc scripts remain
+# unchanged. Host integration alone grants boot; default is deliberately NO.
+. /etc/rc.subr
+name=cloud_talk_runtime
+rcvar=cloud_talk_runtime_enable
+start_cmd=cloud_talk_runtime_start
+stop_cmd=":"
+cloud_talk_runtime_start()
+{
+    /usr/bin/env -i PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin \
+        /usr/local/bin/python3 -I -B /usr/local/libexec/cloud-talk-runtime.py boot-runtime
+}
+load_rc_config "$name"
+: ${cloud_talk_runtime_enable:="NO"}
+run_rc_command "$1"

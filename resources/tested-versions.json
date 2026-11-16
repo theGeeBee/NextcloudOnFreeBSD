@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "tested_versions": {
+    "nextcloud": ["35.0.3"],
+    "php": ["8.5"],
+    "database": ["12.3"]
+  },
+  "tested_combinations": [
+    {
+      "nextcloud": "35.0.3",
+      "php": "8.5",
+      "database": "12.3"
+    }
+  ]
+}

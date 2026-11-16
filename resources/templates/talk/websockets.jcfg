@@ -1,0 +1,12 @@
+general: {
+    json = "compact"
+    ws = true
+    ws_ip = "127.0.0.1"
+    ws_port = 8188
+    wss = false
+    ws_logging = "err,warn"
+}
+admin: {
+    admin_ws = false
+    admin_wss = false
+}

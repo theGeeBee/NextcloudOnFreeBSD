@@ -1,0 +1,4 @@
+# No sample/static rooms, recording paths, admin secret or SIP clients.
+general: {
+    events = true
+}
