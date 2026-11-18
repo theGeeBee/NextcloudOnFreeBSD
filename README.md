@@ -6,7 +6,7 @@ Set up Nextcloud on FreeBSD with ZFS storage, private networking and HTTPS.
 A terminal wizard guides you through installation.
 
 **Stable release: v1.0.1.** Bug fixes, ONLYOFFICE 10 support and FreeBSD 15+
-fresh installation. See the [release notes and downloads](https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.1).
+support for new deployments. See the [release notes and downloads](https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.1).
 
 [Repository](https://github.com/theGeeBee/NextcloudOnFreeBSD) ·
 [Website](https://theGeeBee.github.io/NextcloudOnFreeBSD/) ·
@@ -27,6 +27,12 @@ connect existing SFTP or HTTP/HTTPS storage with **External files**.
 Multiple instances can share a host, each with its own storage and private
 network. Switching an installed office backend is not supported.
 
+A clean or dedicated FreeBSD host is not required. Install alongside existing
+jails on a suitably configured host; see the
+[host preparation guide](https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Coexistence)
+for networking, PF and resource-conflict requirements. The installer creates new
+deployments; it does not adopt or upgrade existing Nextcloud installations.
+
 The defaults are **Nextcloud 35, PHP 8.5 and MariaDB 12.3**. Use **Advanced software
 settings** to choose other versions. Untested choices show a warning but can still
 be attempted; unavailable or incompatible software may fail to install.
@@ -44,7 +50,7 @@ be attempted; unavailable or incompatible software may fail to install.
 
 *Tested on FreeBSD 15.1-RELEASE, 15.2-STABLE and 16-CURRENT.*
 
-Fresh installation accepts FreeBSD 15+ RELEASE, STABLE and CURRENT versions.
+New deployments accept FreeBSD 15+ RELEASE, STABLE and CURRENT versions.
 Use a maintained RELEASE for production.
 
 HTTPS can use Let's Encrypt, supplied certificates or an external reverse proxy.
