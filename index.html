@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Set up Nextcloud on FreeBSD with ZFS storage, HTTPS and your choice of office server.">
-  <title>NextcloudOnFreeBSD — v1.0.0</title>
+  <meta name="description" content="Install Nextcloud on FreeBSD 15+ with isolated jails, ZFS, HTTPS and optional integrated office services.">
+  <title>NextcloudOnFreeBSD — v1.0.1</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -27,15 +27,15 @@
     <section class="hero" aria-labelledby="hero-title">
       <div class="container hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow">v1.0.0 · Stable release</p>
+          <p class="eyebrow">v1.0.1 · Stable release</p>
           <h1 id="hero-title">Your cloud.<br>On FreeBSD.</h1>
-          <p class="lead">Set up Nextcloud with ZFS storage, private networking and HTTPS. A terminal wizard guides you through installation.</p>
+          <p class="lead">Install Nextcloud on FreeBSD 15+ with isolated jails, ZFS, HTTPS and optional integrated office services.</p>
           <div class="actions">
             <a class="button button-primary" href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Installation-Guide">Read the installation guide</a>
             <a class="button button-secondary" href="https://github.com/theGeeBee/NextcloudOnFreeBSD#readme">View the README</a>
           </div>
-          <p class="hero-note">Get the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.0-20261116">v1.0.0 release page</a>.</p>
-          <p class="platform">FreeBSD 15.1-RELEASE · amd64 · New installations</p>
+          <p class="hero-note">Get the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.1">v1.0.1 release page</a>.</p>
+          <p class="platform">Requires FreeBSD 15 or later (amd64)</p>
         </div>
         <div class="logo-panel">
           <img src="assets/logoheader.png" width="1774" height="887" alt="Nextcloud on FreeBSD green daemon and cloud logo">
@@ -107,12 +107,14 @@
           <div>
             <h3>Host &amp; resources</h3>
             <ul>
-              <li>FreeBSD 15.1-RELEASE amd64, root access outside a jail, and a healthy ZFS pool.</li>
+              <li>Requires FreeBSD 15 or later (amd64).</li>
+              <li>Root access outside a jail and a healthy ZFS pool. Use a maintained RELEASE for production.</li>
               <li>Host networking and firewall settings prepared using the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Coexistence">host preparation guide</a>.</li>
               <li>Memory and storage for your selections; 16 GiB RAM or more is recommended for default selections.</li>
               <li>Working bhyve hardware or nested virtualization for Euro-Office and Collabora CODE.</li>
               <li>An interactive terminal, console recovery access and a second SSH session.</li>
             </ul>
+            <p class="tested-note">Tested on FreeBSD 15.1-RELEASE, 15.2-STABLE and 16-CURRENT.</p>
           </div>
           <div>
             <h3>Networking &amp; HTTPS</h3>
@@ -142,7 +144,7 @@
         <p>The wizard walks you through setup. Stay at your terminal to review settings and confirm network access.</p>
       </div>
       <ol class="steps">
-        <li><h3>Get the installer</h3><p>Download and unpack the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.0-20261116">v1.0.0 release page</a>. Keep its directory for Resume, recovery and removal.</p></li>
+        <li><h3>Get the installer</h3><p>Download and unpack the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.1">v1.0.1 release page</a>. Keep its directory for Resume, recovery and removal.</p></li>
         <li><h3>Choose your services</h3><p>Run this from the installer directory as root. The wizard covers storage, networking, HTTPS and applications, and asks before installing missing pkg/Python prerequisites.</p><pre><code>sh install.sh install</code></pre></li>
         <li><h3>Set up port forwarding</h3><p>Forward the selected web and Talk ports to the FreeBSD host, not its private jails or VM, using the values in your installation plan. An external HTTPS proxy changes the web route; follow the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Installation-Guide#port-forwarding">port-forwarding guide</a> for the details. The installer does not configure your router.</p></li>
         <li><h3>Review and install</h3><p>Check your settings and choose <code>APPLY</code>. When prompted, open a new SSH connection to check access, then enter <code>KEEP</code> before the timer expires.</p></li>
@@ -199,10 +201,16 @@ sh install.sh install --config /root/nextcloud-install.json</code></pre>
         <li>Uninstall can save a database/configuration copy for manual recovery. It excludes user files and cannot be used with the installer's Restore command.</li>
       </ul>
     </section>
+    <section class="container thanks" aria-labelledby="thanks-title">
+      <h2 id="thanks-title">Thanks</h2>
+      <p>Thank you to the maintainers, contributors, testers and documentation writers who make this possible.</p>
+      <p>Built with <a href="https://www.freebsd.org/">FreeBSD</a>, <a href="https://bastillebsd.org/">Bastille</a>, <a href="https://nextcloud.com/">Nextcloud</a>, <a href="https://www.onlyoffice.com/">ONLYOFFICE</a>, <a href="https://github.com/freebsd/vm-bhyve">vm-bhyve</a>, <a href="https://alpinelinux.org/">Alpine Linux</a>, <a href="https://www.docker.com/">Docker</a>, <a href="https://www.collaboraonline.com/">Collabora</a> and <a href="https://euro-office.eu/">Euro-Office</a>.</p>
+      <p>If you’d like to support my open-source work: <a href="https://github.com/sponsors/theGeeBee">GitHub Sponsors</a> or <a href="https://ko-fi.com/thegeebee">Ko-fi</a>. Thank you!</p>
+    </section>
   </main>
   <footer class="site-footer">
     <div class="container footer-row">
-      <p>NextcloudOnFreeBSD · v1.0.0<br>© 2026 Gibran Khan. Upstream licenses and trademarks remain with their owners.</p>
+      <p>NextcloudOnFreeBSD · v1.0.1<br>© 2026 Gibran Khan. Upstream licenses and trademarks remain with their owners.</p>
       <div><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD">Source on GitHub</a><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/blob/main/LICENSE">BSD 3-Clause license</a></div>
     </div>
   </footer>
