@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "freebsd-cloud-installer"
-version = "1.0.0"
+version = "1.0.1"
 description = "Interactive Nextcloud and ONLYOFFICE Bastille jail installer for policy-validated FreeBSD targets"
 readme = "README.md"
 requires-python = ">=3.11"

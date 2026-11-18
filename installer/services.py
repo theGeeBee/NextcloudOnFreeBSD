@@ -44,11 +44,17 @@ def talk_selected(config):
 
 
 def validate_policy(policy):
-    versions.object_fields(policy, ("schema_version", "profile", "target", "nextcloud", "php", "push", "talk"), label="native services policy")
+    versions.object_fields(policy, ("schema_version", "profile", "target", "nextcloud", "php", "push", "talk"), ("repository_current_targets", "repository_current_platform"), label="native services policy")
+    versions.repository_current_platform(policy)
     if type(policy["schema_version"]) is not int or policy["schema_version"] != 1 or policy["profile"] != PROFILE:
         raise ValueError("Unsupported native services policy")
     if policy["target"] != {"release": "15.1-RELEASE", "architecture": "amd64"}:
         raise ValueError("Unreviewed native services target")
+    if ("repository_current_targets" in policy and policy["repository_current_targets"] not in (
+            [{"release": "15.2-STABLE", "architecture": "amd64"}],
+            [{"release": "15.2-STABLE", "architecture": "amd64"},
+             {"release": "16.0-CURRENT", "architecture": "amd64"}])):
+        raise ValueError("Unreviewed development native services target")
     for application in ("nextcloud", "php"):
         versions.object_fields(policy[application], ("family",), label="native services application family")
         versions.text(policy[application]["family"], versions.FAMILY, "native services application family")
@@ -172,7 +178,13 @@ def validate_context(extension, target, nextcloud, php, packages, *, repository_
     validate_extension(extension, policy=policy)
     if repository_current and extension["push"] != {"app": "occ", "native": "deferred"}:
         raise ValueError("Repository-current services require the fresh native occ contract")
-    if (any(target[key] != expected for key, expected in policy["target"].items())
+    targets = [policy["target"]] + (policy.get("repository_current_targets", []) if repository_current else [])
+    if repository_current and versions.repository_current_platform(policy) is not None:
+        expected = versions.repository_current_target({**policy, "targets": []}, target["release"], target["architecture"])
+        matches_target = target["abi"] == expected["abi"]
+    else:
+        matches_target = any(all(target[key] == expected for key, expected in item.items()) for item in targets)
+    if (not matches_target
             or (not repository_current and not versions.in_range(nextcloud, policy["nextcloud"]))
             or (not repository_current and not versions.in_range(php, policy["php"]))):
         raise ValueError("Native services context differs from the selected target/Nextcloud/PHP policy")

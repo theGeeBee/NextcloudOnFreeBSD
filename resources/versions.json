@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "package_installation": {"method": "pkg", "policy": "repository-current"},
+  "repository_current_platform": {"minimum_major": 15, "architecture": "amd64"},
   "legacy_target": "15.1-RELEASE/amd64",
   "defaults": {
     "freebsd_release": "15.1-RELEASE",
@@ -14,6 +15,14 @@
     {
       "release": "15.1-RELEASE", "architecture": "amd64", "abi": "FreeBSD:15:amd64",
       "pkgbase_keys": ["/usr/share/keys/pkgbase-15/trusted/awskms-15", "/usr/share/keys/pkgbase-15/trusted/backup-signing-15"]
+    },
+    {
+      "release": "15.2-STABLE", "architecture": "amd64", "abi": "FreeBSD:15:amd64",
+      "pkgbase_keys": ["/usr/share/keys/pkg/trusted/pkg.freebsd.org.2013102301"]
+    },
+    {
+      "release": "16.0-CURRENT", "architecture": "amd64", "abi": "FreeBSD:16:amd64",
+      "pkgbase_keys": ["/usr/share/keys/pkg/trusted/pkg.freebsd.org.2013102301"]
     }
   ],
   "fonts": {"catalog": "packages/fonts.txt"},
@@ -21,6 +30,7 @@
     {
       "id": "nc35-oo94-php85-mariadb123",
       "targets": ["15.1-RELEASE/amd64"],
+      "repository_current_targets": ["15.2-STABLE/amd64", "16.0-CURRENT/amd64"],
       "applications": {
         "nextcloud": {"family": "35"},
         "onlyoffice": {"family": "9.4"}
@@ -269,6 +279,31 @@
     }
   ],
   "evidence": [
+    {
+      "url": "https://github.com/BastilleBSD/bastille/blob/1.4.4/usr/local/share/bastille/bootstrap.sh",
+      "reviewed": "2026-11-17",
+      "scope": "Fresh all-backend eligibility: canonical RELEASE/STABLE/CURRENT major>=15/amd64, not native acceptance. Listed trust paths stay exact. Unlisted pkgbase_keys checks OS pkg fingerprint presence ONLY, not RELEASE pkgbase authentication. Native Bastille --pkgbase/pkg owns release trust/signatures; failures propagate, including unsupported future minor conventions. No invented signing-key names, ABI override, signature bypass or archive fallback.15.1 defaults and historical strict/maintenance unchanged."
+    },
+    {
+      "url": "https://github.com/BastilleBSD/bastille/blob/1.4.4/usr/local/share/bastille/bootstrap.sh",
+      "reviewed": "2026-11-17",
+      "scope": "Development-only exact16.0-CURRENT/amd64 fresh native ONLYOFFICE/Nextcloud/Talk admission, NOT native acceptance. Bastille1.4.4 maps N.N-CURRENT to current; pkgbase uses FreeBSD-base-latest, ABI FreeBSD:16:amd64 and OS /usr/share/keys/pkg fingerprints.15.1 defaults,15.2 behavior and strict/maintenance fences unchanged. Actual signed base, ports, Push and boot compatibility remain unproven."
+    },
+    {
+      "url": "https://github.com/freebsd/freebsd-src/blob/main/share/keys/pkg/trusted/pkg.freebsd.org.2013102301",
+      "reviewed": "2026-11-17",
+      "scope": "Official main source fingerprint for signed pkg repositories; FreeBSD.conf.latest uses /usr/share/keys/pkg for base_latest and ports. Require the installed OS key; no replacement trust download, ABI override, signature bypass or target fallback. Moving base_latest must produce the selected16.0-CURRENT userland."
+    },
+    {
+      "url": "https://github.com/BastilleBSD/bastille/blob/1.4.4/usr/local/share/bastille/bootstrap.sh",
+      "reviewed": "2026-11-16",
+      "scope": "Development-only fresh repository-current native ONLYOFFICE/Nextcloud/Talk15.2-STABLE amd64 admission, NOT native acceptance. Bastille1.4.4 maps N.N-STABLE to current; bootstrap --pkgbase uses FreeBSD-base-latest, ABI FreeBSD:15:amd64 and /usr/share/keys/pkg fingerprints, not RELEASE keys.15.1 defaults, strict targets and maintenance unchanged. Moving base_latest still requires matching kernel/jail userland."
+    },
+    {
+      "url": "https://github.com/freebsd/freebsd-src/blob/stable/15/share/keys/pkg/trusted/pkg.freebsd.org.2013102301",
+      "reviewed": "2026-11-16",
+      "scope": "Official stable/15 distribution fingerprint path for signed pkg repositories. Bastille1.4.4 pkgbase/FreeBSD-base.conf selects FreeBSD-base-latest at pkg+https://pkg.FreeBSD.org/${ABI}/base_latest with signature_type=fingerprints. Require the OS-provided key; do not fetch replacement trust, disable signatures or use RELEASE keys for STABLE."
+    },
     {
       "url": "https://docs.nextcloud.com/server/35/admin_manual/installation/system_requirements.html",
       "reviewed": "2026-11-10",

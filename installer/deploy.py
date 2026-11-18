@@ -28,6 +28,17 @@ BRANDING_FILES = tuple("assets/branding/nextcloud/" + name for name in
                        ("logo.png", "logoheader.png", "favicon.png", "background.jpg"))
 
 
+def talk_payload_sources(plan):
+    """Host copy selection only; the Talk worker authenticates its own inputs."""
+    from .package_policy import repository_current
+    sources = ("installer/__init__.py", "installer/talk.py", "resources/templates/talk", "resources/jails/talk.sh",
+               "resources/jails/talk-runtime.py", "resources/jails/versions.sh", "resources/native-services.json")
+    if repository_current(plan):
+        sources += ("installer/version_runtime.py", "installer/package_policy.py", "installer/versions.py",
+                    "resources/versions.json")
+    return sources
+
+
 def source_digest():
     """Identity of execution code/resources, independent of live credentials."""
     digest = hashlib.sha256()
@@ -755,14 +766,14 @@ run_rc_command "$1"
                 *("resources/jails/" + name for name in ("nextcloud.sh", "nextcloud-bootstrap.php",
                     "nextcloud-cron-fence.php", "runtime-inventory.php", "maintenance.php", "versions.sh", "ssh.sh")))
             if endpoint.role == "talk":
-                sources = ("installer/__init__.py", "installer/talk.py", "resources/templates/talk", "resources/jails/talk.sh",
-                           "resources/jails/talk-runtime.py", "resources/jails/versions.sh", "resources/native-services.json")
-                if repository_current(self.versions):
-                    sources += ("installer/version_runtime.py", "installer/package_policy.py", "installer/versions.py")
+                sources = talk_payload_sources(self.versions)
             elif endpoint.role == "nc" and c.has_native_services:
                 sources = ("installer", "resources/templates/nextcloud", "resources/native-services.json",
                            *("resources/jails/" + name for name in ("nextcloud.sh", "nextcloud-bootstrap.php",
                              "nextcloud-cron-fence.php", "runtime-inventory.php", "maintenance.php", "versions.sh", "ssh.sh")))
+            if (repository_current(self.versions) and "resources" not in sources
+                    and "resources/versions.json" not in sources):
+                sources += ("resources/versions.json",)
             for relative in sources:
                 source = ROOT / relative
                 if source.is_symlink() or any(path.is_symlink() for path in source.rglob("*")):

@@ -383,11 +383,12 @@ def _catalog(config, runner, *, directory=None, policy=None, repository_current=
     database and cache directories are private; no installed package database is
     changed. This adapter only queries the actual, matching FreeBSD environment.
     """
-    from .versions import constraints, load_policy, target, release_base, selected_profiles
+    from .versions import constraints, load_policy, target, repository_current_target, release_base, selected_profiles
     policy = load_policy() if policy is None else policy
     selected_profiles(config, policy, repository_current=repository_current)
     selected = constraints(config, policy, repository_current=repository_current)
-    environment = target(policy, selected["freebsd_release"], selected["architecture"])
+    select_target = repository_current_target if repository_current else target
+    environment = select_target(policy, selected["freebsd_release"], selected["architecture"])
     if (runner.output("uname", "-s") != "FreeBSD"
             or release_base(runner.output("freebsd-version", "-u")) != environment["release"]
             or release_base(runner.output("freebsd-version", "-r")) != environment["release"]

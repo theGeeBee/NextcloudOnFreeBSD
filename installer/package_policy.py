@@ -29,15 +29,17 @@ def repository_current(plan):
 
 def _recipe_profiles(config, policy):
     """Select original recipes before their package-name aliases are replaced."""
-    from .versions import VM_BACKENDS, office_backend, target
+    from .versions import VM_BACKENDS, office_backend, repository_current_target, repository_current_platform
     backend = office_backend(config)
     release = getattr(config, "freebsd_release", "") or policy["defaults"]["freebsd_release"]
     architecture = getattr(config, "architecture", "") or policy["defaults"]["architecture"]
     if getattr(config, "_legacy_target", None):
         release, architecture = config._legacy_target.split("/")
-    identity = target(policy, release, architecture)["release"] + "/" + architecture
+    identity = repository_current_target(policy, release, architecture)["release"] + "/" + architecture
     profiles = [profile for profile in policy["profiles"]
-                if profile.get("office_backend", "onlyoffice") == backend and identity in profile["targets"]]
+                if profile.get("office_backend", "onlyoffice") == backend
+                and (repository_current_platform(policy) is not None
+                     or identity in profile["targets"] + profile.get("repository_current_targets", []))]
     if not profiles:
         label = "No reviewed version policy" if backend in VM_BACKENDS else "No reviewed compatibility profiles"
         raise ValueError(f"{label} for office_backend={backend!r} on {identity}")
@@ -224,10 +226,17 @@ def selection_status(config, policy=None, *, nextcloud=None, tested=None):
 
 def selection_warnings(config, policy=None, *, nextcloud=None, tested=None):
     """Advisory only: missing evidence never changes the requested installation."""
+    warnings = []
+    from .versions import load_policy, release_base
+    policy = load_policy() if policy is None else policy
+    release = release_base(getattr(config, "freebsd_release", "") or policy["defaults"]["freebsd_release"])
+    architecture = getattr(config, "architecture", "") or policy["defaults"]["architecture"]
+    if release != policy["defaults"]["freebsd_release"]:
+        warnings.append(f"FreeBSD {release}/{architecture}: this platform/backend combination is not established by the default-platform evidence. Normal native installation will be attempted; package availability and compatibility may fail. Historical strict profiles and maintenance/upgrade support are unchanged.")
     status = selection_status(config, policy, nextcloud=nextcloud, tested=tested)
     if status["status"] != "unrecorded":
-        return []
-    return ["Versions not recorded in resources/tested-versions.json: " + ", ".join(status["unknown"]) + ". "
+        return warnings
+    return warnings + ["Versions not recorded in resources/tested-versions.json: " + ", ".join(status["unknown"]) + ". "
             "The existing installation recipe will be attempted without compatibility validation; "
             "packages or upstream commands may fail. Arbitrary combinations are not guaranteed to work."]
 
@@ -244,7 +253,7 @@ def selection_note(config, policy=None, *, nextcloud=None, tested=None):
     return ""
 
 
-def validate_requirements(value):
+def validate_requirements(value, *, target=None):
     """Validate root requests; schema 2 also permits unobserved names/origins.
 
     An empty origin is absence of observation, never a manufactured identity.
@@ -255,8 +264,17 @@ def validate_requirements(value):
         raise ValueError("Unsupported package requirements schema")
     if value["repository"] not in ("latest", "quarterly") or value["group"] not in GROUPS:
         raise ValueError("Invalid package requirements repository/group")
-    if value["abi"] != "FreeBSD:15:amd64":
-        raise ValueError("Repository-current requirements need the reviewed FreeBSD:15:amd64 ABI")
+    # Callers bind the authenticated plan/policy target. Without that context,
+    # retain the historical15 ABI contract; never infer a16 target from a row.
+    expected_abi = "FreeBSD:15:amd64"
+    if target is not None:
+        from .versions import release_base
+        release = release_base(target["release"])
+        expected_abi = "FreeBSD:" + release.split(".")[0] + ":" + target["architecture"]
+        if target["abi"] != expected_abi or target["architecture"] != "amd64":
+            raise ValueError("Package requirements target ABI differs from policy")
+    if value["abi"] != expected_abi:
+        raise ValueError("Repository-current requirements need the selected reviewed target ABI")
     roots = value["roots"]
     if not isinstance(roots, dict) or not roots or len(roots) > 1024:
         raise ValueError("Package requirements need nonempty bounded roots")
@@ -308,7 +326,7 @@ def requirements(plan, group):
             raise ValueError("Package root is missing from the catalog preview: " + name)
         roots[name] = record["origin"]
     return validate_requirements({"schema_version": 2 if "root_origins" in plan else 1, "repository": plan["repository"],
-                                  "abi": plan["target"]["abi"], "group": group, "roots": roots})
+                                  "abi": plan["target"]["abi"], "group": group, "roots": roots}, target=plan["target"])
 
 
 def requirements_text(plan, group):

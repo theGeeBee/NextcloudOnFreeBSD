@@ -269,13 +269,8 @@ def preflight_review(config, facts, runner, registry, ui, *, resume=False):
                 require_services_execution(config)
 
 
-def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-    plain = "--plain" in argv
-    argv = [value for value in argv if value != "--plain"]
-    aliases = {"--plan": "plan", "--configure-only": "configure", "--verify": "verify"}
-    if argv and argv[0] in aliases:
-        argv[0] = aliases[argv[0]]
+def argument_parser():
+    """Construct the CLI grammar without inspecting the host or executing commands."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plain", action="store_true", help="Use numbered terminal prompts instead of bsddialog")
     commands = parser.add_subparsers(dest="command")
@@ -371,6 +366,17 @@ def main(argv=None):
             recovery_action.add_argument("--assess", action="store_true", help="Read-only operation recovery assessment; requires OP-ID")
             recovery_action.add_argument("--restore-original", action="store_true",
                                          help="Explicit pre-publication whole-set recovery; native acceptance still required")
+    return parser
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    plain = "--plain" in argv
+    argv = [value for value in argv if value != "--plain"]
+    aliases = {"--plan": "plan", "--configure-only": "configure", "--verify": "verify"}
+    if argv and argv[0] in aliases:
+        argv[0] = aliases[argv[0]]
+    parser = argument_parser()
     for option in ("--config", "--yes", "--accept-licenses", "--accept-acme-terms"):
         if sum(value == option or value.startswith(option + "=") for value in argv) > 1:
             parser.error("Specify each recipe option at most once")
@@ -870,7 +876,7 @@ def show_status(registry, instance=None):
                 jails += f", {config.onlyoffice_jail} ({config.onlyoffice_host})"
             print(f"  Jails: {jails}")
             if config.has_office and not config.native_office:
-                print("  Office runtime: dedicated Alpine/bhyve/Docker VM; installation support unavailable")
+                print("  Office runtime: dedicated Alpine/bhyve/Docker VM")
             print(f"  State: {registry.instance_path(config.instance)}")
             journal = registry.instance_path(config.instance) / "deployment.json"
             if journal.exists():

@@ -109,9 +109,19 @@ function cloudVersions(mixed $value): array {
         foreach (['php', 'database', 'onlyoffice'] as $key) {
             if (array_key_exists($key, $patterns)) { $patterns[$key] = '(?:[A-Za-z0-9._+][A-Za-z0-9.+_,\\~:\\-]*)?'; }
         }
+        if (($value['app_installation'] ?? '') === 'occ'
+            && ($value['architecture'] ?? '') === 'amd64') {
+            // Runtime carries the unpatched base; staged policy admission and
+            // native dependency ABI checks belong to versions.sh, not NC source.
+            $patterns['freebsd_release'] = '[1-9][0-9]*\.(?:0|[1-9][0-9]*)-(?:RELEASE|STABLE|CURRENT)';
+        }
     }
     if (!is_array($value) || array_diff(array_keys($value), array_keys($patterns))
         || array_diff(array_keys($patterns), array_keys($value))) {
+        cloudFail(10);
+    }
+    if (($value['package_installation'] ?? '') === 'pkg' && ($value['app_installation'] ?? '') === 'occ'
+        && ((int)explode('.', $value['freebsd_release'] ?? '')[0] < 15 || ($value['architecture'] ?? '') !== 'amd64')) {
         cloudFail(10);
     }
     foreach ($patterns as $key => $pattern) {
@@ -342,8 +352,12 @@ function cloudNativeServices(array $c): void {
     $s = $c['native_services'] ?? null;
     if (!is_array($s)) { cloudFail(10); }
     cloudExact($s, ['profile', 'push', 'talk']);
+    $development = ($c['versions']['package_installation'] ?? '') === 'pkg'
+        && ($c['versions']['app_installation'] ?? '') === 'occ'
+        && preg_match('/\A([1-9][0-9]*)\.(?:0|[1-9][0-9]*)-(?:RELEASE|STABLE|CURRENT)\z/', $c['versions']['freebsd_release'], $release)
+        && (int)$release[1] >= 15;
     if ($s['profile'] !== 'native-v1' || !is_array($s['push'])
-        || $c['versions']['freebsd_release'] !== '15.1-RELEASE' || $c['versions']['architecture'] !== 'amd64'
+        || ($c['versions']['freebsd_release'] !== '15.1-RELEASE' && !$development) || $c['versions']['architecture'] !== 'amd64'
         || (($c['versions']['package_installation'] ?? '') !== 'pkg'
             && (!str_starts_with($c['versions']['nextcloud'], '35.') || !str_starts_with($c['versions']['php'], '8.5.')))) {
         cloudFail(10);

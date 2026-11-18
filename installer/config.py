@@ -434,10 +434,10 @@ class Config:
 
     @property
     def release(self):
-        from .versions import defaults
+        from .versions import defaults, release_base
         if getattr(self, "_legacy_target", None):
             return self._legacy_target.split("/")[0]
-        return self.freebsd_release or defaults()["freebsd_release"]
+        return release_base(self.freebsd_release or defaults()["freebsd_release"])
 
     @property
     def arch(self):

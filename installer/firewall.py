@@ -43,6 +43,18 @@ CUSTOM_DIRECTORY = Path("/etc/pf.nextcloud-custom")
 CUSTOM_LIMIT = 65536
 
 
+def _ethernet_query(runner):
+    """Select pfctl's show spelling, never omit Ethernet policy inspection.
+
+    release/14.5.0 supports Ethernet rules but names the show modifier 'ether'
+    (only its flush modifier is 'ethernet'). Other targets keep their original
+    command. Inspect userland, which supplies pfctl, not a saved plan/kernel
+    patch count. Failed probes/queries still fail through the caller's runner.
+    """
+    release = runner.run("freebsd-version", "-u").stdout.strip()
+    return ("-s", "ether" if re.fullmatch(r"14\.5-RELEASE(?:-p[0-9]+)?", release) else "ethernet")
+
+
 def custom_instances(network):
     """Immutable hook inventory, never an identity/hash of administrator content."""
     names = network.get("custom_egress", [])
@@ -141,7 +153,7 @@ def _custom_namespace(runner, instances, *, exact=True):
 
 def _empty_custom_leaf(runner, name):
     anchor = f"{PF_ANCHOR}/admin-{name}"
-    for args in (("-P", "-sr"), ("-sn",), ("-s", "Tables"), ("-s", "ethernet"), ("-s", "Anchors")):
+    for args in (("-P", "-sr"), ("-sn",), ("-s", "Tables"), _ethernet_query(runner), ("-s", "Anchors")):
         if runner.run("pfctl", "-a", anchor, *args).stdout.strip():
             raise ValueError("Retired administrator PF leaf is not empty")
 
@@ -179,7 +191,7 @@ def verify_custom_children(network, runner, *, files=False):
     rules = {}
     for name in names:
         anchor = f"{PF_ANCHOR}/admin-{name}"
-        for args in (("-sn",), ("-s", "Tables"), ("-s", "ethernet"), ("-s", "Anchors")):
+        for args in (("-sn",), ("-s", "Tables"), _ethernet_query(runner), ("-s", "Anchors")):
             if runner.run("pfctl", "-a", anchor, *args).stdout.strip():
                 raise ValueError("Administrator PF leaf contains translation, tables, Ethernet or nested anchors")
         # -P preserves numeric ports instead of FreeBSD /etc/services names.
@@ -266,7 +278,7 @@ class StarterRequired(ValueError):
 
 
 def _empty_live_parent(runner):
-    for args in (("-sr",), ("-sn",), ("-s", "ethernet"), ("-s", "Anchors"),
+    for args in (("-sr",), ("-sn",), _ethernet_query(runner), ("-s", "Anchors"),
                  ("-s", "Tables"), ("-ss",)):
         result = runner.run("pfctl", *args, check=False)
         if result.returncode or result.stdout.strip():
@@ -437,7 +449,7 @@ def _verify_parent(runner):
         raise ValueError("Enable the prepared administrator PF parent, then Recheck host")
     validate_parent_policy(output("pfctl", "-sr"), live=True)
     validate_parent_policy(output("pfctl", "-sn"), live=True, translation=True)
-    if output("pfctl", "-s", "ethernet"):
+    if output("pfctl", *_ethernet_query(runner)):
         raise ValueError("PF Ethernet policy is outside the supported parent contract")
     interfaces = output("pfctl", "-v", "-s", "Interfaces")
     if not interfaces:

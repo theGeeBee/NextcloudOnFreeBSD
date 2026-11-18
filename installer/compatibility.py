@@ -8,7 +8,7 @@ from . import package_policy, services
 
 from .versions import (GROUPS, NAME, ORIGIN, TRIPLE, VM_BACKENDS, CONNECTOR_APPS, connector_php_spec, constraints, in_range,
                        in_family, load_policy, object_fields, office_backend, package_upstream, selected_profiles,
-                       satisfies, stable_version, target, text, validate_policy, validate_runtime_artifacts)
+                       satisfies, stable_version, target, repository_current_target, text, validate_policy, validate_runtime_artifacts)
 
 
 VERSION = r"[A-Za-z0-9._+][A-Za-z0-9_+.,~:-]*"
@@ -141,7 +141,8 @@ def discovered_inputs(config, discovered, policy):
     if vm and (discovered["connector_app"] != CONNECTOR_APPS[backend] or not isinstance(discovered["artifacts"], dict)):
         raise ValueError("VM discovery connector/artifact context does not match backend")
     effective = constraints(config, policy, repository_current=current)
-    expected = target(policy, effective["freebsd_release"], effective["architecture"])
+    select_target = repository_current_target if current else target
+    expected = select_target(policy, effective["freebsd_release"], effective["architecture"])
     if discovered["target"] != expected:
         raise ValueError("Discovered target does not match the selected release/architecture/ABI")
     if discovered["repository"] not in ("latest", "quarterly") or discovered["repository"] != getattr(config, "repository", None):

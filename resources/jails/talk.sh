@@ -41,7 +41,7 @@ trusted "$PAYLOAD/installer/talk.py"
 . "$PAYLOAD/resources/jails/versions.sh"
 version_load talk
 version_environment
-[ "$version_release" = 15.1-RELEASE ] && [ "$version_architecture" = amd64 ] \
+[ "$version_architecture" = amd64 ] \
     && [ "$version_service_profile" = native-v1 ] && [ "$version_talk_selected" = yes ] \
     || fail 'Unreviewed Talk target or service selection.'
 # Validate the public envelope before installing the explicit Python root.

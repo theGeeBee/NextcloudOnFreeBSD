@@ -102,9 +102,9 @@ class Runner:
 def require_host(runner):
     if os.geteuid() != 0 or runner.output("uname", "-s") != "FreeBSD":
         raise ValueError("Run the installer as root on the target FreeBSD host, not a development workstation")
-    from .versions import load_policy, release_base, target
+    from .versions import load_policy, release_base, repository_current_target
     release = release_base(runner.output("freebsd-version", "-u"))
-    target(load_policy(), release, runner.output("uname", "-m"))
+    repository_current_target(load_policy(), release, runner.output("uname", "-m"))
     if release_base(runner.output("freebsd-version", "-r")) != release:
         raise ValueError("Boot the matching updated FreeBSD kernel before installing jails")
     if runner.output("sysctl", "-n", "security.jail.jailed") != "0":
@@ -1142,8 +1142,11 @@ def preflight(config, facts, runner, *, registry=None, resume=False):
     c.require_jail_backend("Host preflight")
     if c.native_office and facts.get('memory_mb',8192) < 8192:
         raise ValueError("At least 8 GiB RAM is required for this combined deployment; 16 GiB or more is recommended")
-    from .versions import load_policy, target
-    environment = target(load_policy(), c.release, c.arch)
+    from .versions import load_policy, target, repository_current_target
+    from .package_policy import repository_current
+    policy = load_policy()
+    select_target = repository_current_target if repository_current(policy) else target
+    environment = select_target(policy, c.release, c.arch)
     if (facts.get("freebsd_release", c.release) != c.release
             or facts.get("architecture", c.arch) != c.arch):
         raise ValueError("Selected FreeBSD target differs from the detected host; no OS upgrade is performed")
@@ -1169,7 +1172,7 @@ def preflight(config, facts, runner, *, registry=None, resume=False):
         raise ValueError("Timezone is not present in the host zoneinfo database")
     for path in environment["pkgbase_keys"]:
         if not Path(path).is_file():
-            raise ValueError("Install the selected FreeBSD release's trusted pkgbase keys from the OS distribution before bootstrapping jails")
+            raise ValueError("Install the selected FreeBSD target's required OS fingerprint files from the OS distribution before bootstrapping jails")
     bridges = _check_bridges(c, configs, owned, jail_roots, resume, runner,registry=registry)
     _check_interface_routes(c, facts, bridges, runner)
     _check_jails(c, configs, owned, jail_roots, runner)

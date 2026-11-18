@@ -31,7 +31,7 @@ version_load() {
     VERSION_SERVICES=$PAYLOAD/services.json
     VERSION_REQUIREMENTS=$PAYLOAD/packages.requirements.json
     [ -x /usr/libexec/flua ] || fail 'FreeBSD base flua is required to validate the version plan.'
-    version_settings=$(/usr/libexec/flua - "$RUNTIME" "$VERSION_LOCK" "$VERSION_DEPENDENCIES" "$1" "$VERSION_SERVICES" "$PAYLOAD/resources/native-services.json" "$VERSION_REQUIREMENTS" <<'LUA'
+    version_settings=$(/usr/libexec/flua - "$RUNTIME" "$VERSION_LOCK" "$VERSION_DEPENDENCIES" "$1" "$VERSION_SERVICES" "$PAYLOAD/resources/native-services.json" "$VERSION_REQUIREMENTS" "$PAYLOAD/resources/versions.json" <<'LUA'
 local ok, result = pcall(function()
     local parser = require("ucl").parser()
     assert(parser:parse_file(arg[1]))
@@ -86,6 +86,17 @@ local ok, result = pcall(function()
         assert(p:parse_file(path))
         return p:get_object()
     end
+    local function platform(policy)
+        if not current or not fresh or policy.repository_current_platform == nil then return false end
+        local rule = policy.repository_current_platform
+        exact(rule, {"minimum_major", "architecture"})
+        assert(math.type(rule.minimum_major) == "integer" and rule.minimum_major == 15 and rule.architecture == "amd64")
+        local major, minor, channel = v.freebsd_release:match("^(%d+)%.(%d+)%-([A-Z]+)$")
+        assert(major and (major == "0" or not major:match("^0")) and (minor == "0" or not minor:match("^0")))
+        assert(tonumber(major) >= rule.minimum_major and v.architecture == rule.architecture)
+        assert(channel == "RELEASE" or channel == "STABLE" or channel == "CURRENT")
+        return true
+    end
     if v.service_profile ~= nil then
         assert(v.service_profile == "native-v1")
         assert(v.talk_selected == "yes" or v.talk_selected == "no")
@@ -96,7 +107,15 @@ local ok, result = pcall(function()
         assert(services.talk == (v.talk_selected == "yes"))
         assert(type(services.policy_sha256) == "string" and #services.policy_sha256 == 64 and services.policy_sha256:match("^[a-f0-9]+$"))
         assert(service_policy.schema_version == 1 and service_policy.profile == services.profile)
-        assert(v.freebsd_release == "15.1-RELEASE" and v.architecture == "amd64")
+        local targets = {service_policy.target}
+        if current then
+            for _, item in ipairs(service_policy.repository_current_targets or {}) do targets[#targets + 1] = item end
+        end
+        local matched = platform(service_policy)
+        for _, item in ipairs(targets) do
+            if item.release == v.freebsd_release and item.architecture == v.architecture then matched = true end
+        end
+        assert(matched)
         if not current then assert(v.nextcloud:match("^35%.") and v.php:match("^8%.5%.")) end
         exact(services.push, {"app", "native"})
         if fresh then
@@ -142,7 +161,11 @@ local ok, result = pcall(function()
     else
         assert(numeric(v.php) and numeric(v.database))
     end
-    assert(v.freebsd_release:match("^%d+%.%d+%-RELEASE$"))
+    local version_policy = current and load(arg[8]) or nil
+    local generic = version_policy and platform(version_policy)
+    local development = current and fresh and not none and not vm
+        and (v.freebsd_release == "15.2-STABLE" or v.freebsd_release == "16.0-CURRENT") and v.architecture == "amd64"
+    assert(v.freebsd_release:match("^%d+%.%d+%-RELEASE$") or development or generic)
     assert(v.architecture:match("^[a-z][a-z0-9_]*$"))
     assert(v.php_package:match("^php%d+$"))
     for _, key in ipairs(current and {"plan_sha256", "requirements_sha256"} or {"plan_sha256", "packages_sha256", "dependencies_sha256"}) do
@@ -152,7 +175,18 @@ local ok, result = pcall(function()
         local r = load(arg[7])
         exact(r, {"schema_version", "repository", "abi", "group", "roots"})
         assert((r.schema_version == 1 or r.schema_version == 2) and r.repository == runtime.repository)
-        assert(r.abi == "FreeBSD:15:amd64" and v.freebsd_release == "15.1-RELEASE" and v.architecture == "amd64")
+        local selected
+        for _, item in ipairs(version_policy.targets) do
+            if item.release == v.freebsd_release and item.architecture == v.architecture then selected = item end
+        end
+        local abi
+        if generic then
+            abi = "FreeBSD:" .. v.freebsd_release:match("^(%d+)%.") .. ":amd64"
+        else
+            assert(selected and (v.freebsd_release == "15.1-RELEASE" or development) and v.architecture == "amd64")
+            abi = selected.abi
+        end
+        assert(r.abi == abi)
         assert(r.group == arg[4] and (r.group == "nextcloud" or r.group == "onlyoffice" or r.group == "talk"))
         assert(type(r.roots) == "table" and next(r.roots))
         local count = 0
@@ -187,7 +221,7 @@ local ok, result = pcall(function()
         return prefix .. "pkg " .. (fresh and "occ" or "legacy") .. " " .. (v.office_backend or "onlyoffice") .. " "
             .. runtime.repository .. " " .. v.nextcloud .. " " .. observed(v.onlyoffice or "none") .. " "
             .. table.concat({observed(v.php), observed(v.database), v.freebsd_release, v.architecture, v.php_package, v.plan_sha256, v.requirements_sha256,
-                v.connector or "none", v.connector_app or "none", v.connector_sha256 or "none"}, " ")
+                v.connector or "none", v.connector_app or "none", v.connector_sha256 or "none", abi}, " ")
     end
     local file = assert(io.open(arg[2], "rb"))
     local text = assert(file:read("*a"))
@@ -277,7 +311,7 @@ LUA
         version_settings=${version_settings#* }
         read -r version_app_installation version_office_backend repository version_nextcloud version_onlyoffice version_php version_database \
             version_release version_architecture version_php_package version_plan_sha256 version_requirements_sha256 \
-            version_connector version_connector_app version_connector_sha256 <<EOF
+            version_connector version_connector_app version_connector_sha256 version_abi <<EOF
 $version_settings
 EOF
         [ "$version_app_installation" != legacy ] || version_app_installation=
@@ -334,6 +368,7 @@ version_environment() {
         case "$version_actual" in
             "$version_release") ;;
             "$version_release"-p*)
+                case "$version_release" in *-RELEASE) ;; *) fail 'Development targets require the exact selected release identity.' ;; esac
                 version_patch=${version_actual#"$version_release"-p}
                 case "$version_patch" in ''|*[!0-9]*) fail 'Expected a stable patch of the selected FreeBSD release.' ;; esac
                 ;;
@@ -503,8 +538,9 @@ LUA
 version_requirement_record() {
     # Validate query framing before reading its scalars, including exact-name
     # matching (pkg accepts name-version and origin patterns as well as names).
-    printf '%s\n' "$1" | awk -F '|' '
-        NR != 1 || NF != 3 || $1 !~ /^[A-Za-z0-9][A-Za-z0-9_+.-]*$/ || $2 !~ /^[A-Za-z0-9][A-Za-z0-9_+.-]*\/[A-Za-z0-9][A-Za-z0-9_+.-]*$/ || ($3 != "FreeBSD:15:amd64" && $3 != "FreeBSD:15:*") {bad=1}
+    [ -n "${version_abi:-}" ] || fail 'Missing selected package target ABI.'
+    printf '%s\n' "$1" | awk -F '|' -v abi="$version_abi" -v wildcard="${version_abi%:*}:*" '
+        NR != 1 || NF != 3 || $1 !~ /^[A-Za-z0-9][A-Za-z0-9_+.-]*$/ || $2 !~ /^[A-Za-z0-9][A-Za-z0-9_+.-]*\/[A-Za-z0-9][A-Za-z0-9_+.-]*$/ || ($3 != abi && $3 != wildcard) {bad=1}
         END {exit bad || NR != 1}
     ' || fail "Invalid package identity or target ABI: $version_name."
     IFS='|' read -r version_observed_name version_observed_origin version_observed_abi <<EOF

@@ -175,7 +175,7 @@ def snapshot(registry):
 
 def render(view, *, host_release=None, updates=None):
     lines = ["Managed host dashboard (advisory; no repair or update discovery)"]
-    if isinstance(host_release, str) and re.fullmatch(r"[0-9]+\.[0-9]+-RELEASE(?:-p[0-9]+)?", host_release):
+    if isinstance(host_release, str) and re.fullmatch(r"(?:[0-9]+\.[0-9]+-RELEASE(?:-p[0-9]+)?|15\.2-STABLE|16\.0-CURRENT)", host_release):
         lines.append("Host userland: " + host_release)
     else:
         lines.append("Host userland: unknown")

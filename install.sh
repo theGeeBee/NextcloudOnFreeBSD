@@ -13,6 +13,7 @@ fail() {
 usage() {
 	cat <<'USAGE'
 Usage: sh install.sh [--plain] [COMMAND]
+Requires FreeBSD 15 or higher (amd64), using a supported release listed by the installer.
   (no command)                 Open the interactive instance menu
   install | configure          Create an instance, or save its configuration
   install --config FILE [--yes] [--accept-licenses] [--accept-acme-terms]
@@ -79,11 +80,14 @@ require_host() {
 	[ "$(id -u)" -eq 0 ] || fail 'Run as root on the target FreeBSD host.'
     [ "$(uname -s)" = FreeBSD ] || fail 'This installer requires a policy-supported FreeBSD host.'
 	userland=$(freebsd-version -u)
-	printf '%s\n' "$userland" | grep -Eq '^[0-9]+\.[0-9]+-RELEASE(-p[0-9]+)?$' \
-		|| fail 'A stable FreeBSD RELEASE userland is required; update the OS separately.'
+	printf '%s\n' "$userland" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(RELEASE(-p(0|[1-9][0-9]*))?|STABLE|CURRENT)$' \
+		|| fail 'A canonical FreeBSD RELEASE, STABLE or CURRENT userland is required; update the OS separately.'
 	[ "$(sysctl -n security.jail.jailed)" = 0 ] || fail 'Run on the host, outside any jail.'
 	architecture=$(uname -m)
 	case "$architecture" in ''|*[!A-Za-z0-9_]*) fail 'Invalid FreeBSD architecture.' ;; esac
+	# Standalone transport refuses unsupported platforms before retrieval/bootstrap.
+	[ "${userland%%.*}" -ge 15 ] && [ "$architecture" = amd64 ] \
+		|| fail 'Requires FreeBSD 15 or higher (amd64), using a supported release listed by the installer.'
 	# FreeBSD base flua checks the same policy before optional pkg/Python bootstrap.
 	# A standalone entrypoint cannot know the supplied artifact's support matrix
 	# until it is authenticated and unpacked. Require existing Python in that case
@@ -93,6 +97,15 @@ require_host() {
 local p = require('ucl').parser()
 assert(p:parse_file(arg[1]))
 local policy = p:get_object()
+local platform = policy.repository_current_platform
+if platform ~= nil then
+    assert(type(platform) == 'table' and type(platform.minimum_major) == 'number'
+        and platform.minimum_major == 15 and platform.architecture == 'amd64')
+    for key in pairs(platform) do assert(key == 'minimum_major' or key == 'architecture') end
+    local major = arg[2]:match('^(%d+)%.')
+    if major and tonumber(major) >= platform.minimum_major and arg[3] == platform.architecture then os.exit(0) end
+    os.exit(1)
+end
 for _, target in ipairs(policy.targets) do
     if target.release == arg[2] and target.architecture == arg[3] then os.exit(0) end
 end
@@ -126,7 +139,7 @@ require_python() {
 		|| fail 'Python 3.11+ is required; update an older Python separately.'
 }
 
-bootstrap_python() {
+bootstrap_python() (
 	# -N queries the base pkg shim without triggering automatic bootstrap.
 	if ! /usr/sbin/pkg -N >/dev/null 2>&1; then
 		bootstrap_consent 'Bootstrap missing pkg from FreeBSD-ports? Command: /usr/sbin/pkg bootstrap -y -r FreeBSD-ports' || fail 'pkg bootstrap declined.'
@@ -188,7 +201,7 @@ LUA_PACKAGES
 		done || fail 'An existing host package changed; inspect native pkg state before continuing.'
 	fi
 	require_python
-}
+)
 
 bootstrap_consent() {
 	if [ "${assume_yes:-0}" -eq 1 ]; then
@@ -416,6 +429,11 @@ launch_python() {
 	exec python3 -I -B -c 'import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); sys.argv[0] = "install.sh"; runpy.run_module("installer.main", run_name="__main__")' "$script_dir" "$@"
 }
 
+require_instance_name() {
+	case "$1" in [a-z]*) ;; *) fail 'Invalid instance name.' ;; esac
+	case "$1" in *[!a-z0-9]*|?????????*) fail 'Invalid instance name.' ;; esac
+}
+
 main() {
 	# Help is always offline, including a standalone downloaded entrypoint.
 	for argument in "$@"; do
@@ -444,9 +462,15 @@ main() {
 	# Validate only the bootstrap routing shape; the Python parser owns the CLI.
 	[ "$#" -eq 0 ] || [ -n "$1" ] || fail 'Unexpected empty command.'
 	mode=${1:-menu}
+	# Canonical routing only; forward the operator's quoted argv unchanged.
+	case "$mode" in
+		--plan) mode=plan ;;
+		--configure-only) mode=configure ;;
+		--verify) mode=verify ;;
+	esac
 	case "$mode" in
 		menu) [ "$#" -eq 0 ] || fail 'Open the menu with: sh install.sh [--plain]' ;;
-		install|configure|--configure-only)
+		install|configure)
 			# Rotate only the validated recipe options, preserving quoted argv and cwd.
 			seen_licenses=0 seen_acme=0
 			remaining=$(( $# - 1 ))
@@ -485,7 +509,7 @@ main() {
 			fi
 			;;
 		list|recover-network) [ "$#" -eq 1 ] || fail 'Unexpected command arguments.' ;;
-		plan|--plan|resume|status|verify|--verify|add-user|recover-install)
+		plan|resume|status|verify|add-user|recover-install)
 			[ "$#" -eq 2 ] && [ -n "$2" ] || fail 'This command requires one file or instance.' ;;
 		resolve) [ "$#" -ge 2 ] && [ -n "$2" ] || fail 'Usage: resolve FILE [--metadata FILE] [--installed PLAN]' ;;
 		check-updates|check-security) : ;; # Python validates the inspection target and detailed flags.
@@ -493,8 +517,7 @@ main() {
 		maintenance)
 			case "${2:-}" in
 				register) [ "$#" -eq 3 ] && [ -n "$3" ] || fail 'Usage: maintenance register NAME'
-					case "$3" in [a-z]*) ;; *) fail 'Invalid instance name.' ;; esac
-					case "$3" in *[!a-z0-9]*|?????????*) fail 'Invalid instance name.' ;; esac ;;
+					require_instance_name "$3" ;;
 				plan|stage|prepare-target|continue|cancel|status|recover|apply) : ;; # Python validates detailed flags, without bootstrap.
 				*) fail 'Usage: maintenance register | plan | stage | prepare-target | continue | cancel | status | recover | apply' ;;
 			esac ;;
@@ -534,9 +557,8 @@ main() {
 		*) usage >&2; fail 'Unknown command.' ;;
 	esac
 	case "$mode" in
-		resume|status|verify|--verify|add-user|recover-install|remove|backup|restore|upgrade)
-			case "$2" in [a-z]*) ;; *) fail 'Invalid instance name.' ;; esac
-			case "$2" in *[!a-z0-9]*|?????????*) fail 'Invalid instance name.' ;; esac
+		resume|status|verify|add-user|recover-install|remove|backup|restore|upgrade)
+			require_instance_name "$2"
 			;;
 	esac
 	if [ -n "$archive_source$archive_sha256" ]; then
@@ -544,7 +566,7 @@ main() {
 		case "$archive_sha256" in *[!a-fA-F0-9]*) fail 'Invalid SHA256 digest.' ;; esac
 		case "$archive_source" in https://?*) ;; *://*|-*|//*|https:*) fail 'Archive URL must use HTTPS; otherwise use a local file path.' ;; esac
 		case "$mode" in
-			menu|list|status|check-updates|check-security|maintenance|upgrade|plan|--plan|resolve)
+			menu|list|status|check-updates|check-security|maintenance|upgrade|plan|resolve)
 				fail 'Menu, list, status, check-updates, check-security, maintenance, upgrade, plan and resolve require an already unpacked checkout/release; archive acquisition is unavailable for these commands.' ;;
 		esac
 	fi
@@ -561,7 +583,7 @@ main() {
 				if [ "$argument" = --metadata ]; then launch_python "$@"; return; fi
 			done
 			;;
-		plan|--plan)
+		plan)
 			[ -z "$archive_source" ] || fail 'Offline planning requires an already unpacked checkout/release; no downloads are performed.'
 			launch_python "$@"
 			return
@@ -597,7 +619,7 @@ main() {
 			|| fail 'Lifecycle state requires its matching manager or explicit enrollment recovery; no bootstrap performed.'
 	fi
 	case "$mode" in
-		install|configure|--configure-only|resume)
+		install|configure|resume)
 			require_terminal
 			if [ -f "$script_dir/resources/versions.json" ]; then
 				bootstrap_python

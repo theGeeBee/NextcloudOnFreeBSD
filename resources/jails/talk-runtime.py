@@ -334,20 +334,44 @@ def current_requirements(runtime):
         protected_read(PAYLOAD + "/installer/" + name, 131072)
     from installer.package_policy import validate_requirements
     from installer.version_runtime import validate_runtime_versions
+    from installer.versions import target
     try:
         validate_runtime_versions(versions)
+        policy = json.loads(protected_read(PAYLOAD + "/resources/versions.json", 131072), object_pairs_hook=_unique)
+        generic = current_platform(policy, versions)
+        if generic:
+            selected = {"release": versions["freebsd_release"], "architecture": "amd64",
+                        "abi": "FreeBSD:" + versions["freebsd_release"].split(".")[0] + ":amd64"}
+        else:
+            selected = target(policy, versions["freebsd_release"], versions["architecture"])
         data = protected_read(PAYLOAD + "/packages.requirements.json", 1048576,
                               private=True, private_mode=0o600)
         if hashlib.sha256(data).hexdigest() != versions["requirements_sha256"]:
             raise InputError("Talk package requirements differ from the immutable runtime digest.")
-        value = validate_requirements(json.loads(data, object_pairs_hook=_unique))
+        value = validate_requirements(json.loads(data, object_pairs_hook=_unique), target=selected)
         if (value["group"] != "talk" or value["repository"] != runtime.get("repository")
-                or value["abi"] != "FreeBSD:15:amd64"
-                or versions["freebsd_release"] != "15.1-RELEASE" or versions["architecture"] != "amd64"):
+                or (not generic and versions["freebsd_release"] not in ("15.1-RELEASE", "15.2-STABLE", "16.0-CURRENT"))
+                or versions["architecture"] != "amd64"):
             raise InputError("Talk package requirements differ from the selected group, repository or target.")
         return value
     except ValueError:
         raise InputError("Invalid authenticated Talk package requirements.") from None
+
+
+def current_platform(policy, versions):
+    """Optional fresh-only admission; absence preserves exact target policy."""
+    if versions.get("app_installation") != "occ" or "repository_current_platform" not in policy:
+        return False
+    from installer.versions import repository_current_platform, repository_current_release
+    try:
+        rule = repository_current_platform(policy)
+    except ValueError:
+        raise InputError("Invalid Talk repository-current platform policy.") from None
+    try:
+        repository_current_release(rule, versions.get("freebsd_release"), versions.get("architecture"), normalized=True)
+    except ValueError:
+        raise InputError("Talk runtime differs from the fresh native platform policy.") from None
+    return True
 
 
 def validate_locked_payload(runtime):
@@ -368,6 +392,11 @@ def validate_locked_payload(runtime):
     if (services.get("profile") != "native-v1" or services.get("talk") is not True
             or services.get("policy_sha256") != hashlib.sha256(canonical).hexdigest()):
         raise InputError("Talk service policy identity differs from the selected locked policy.")
+    if repository_current(versions) and not current_platform(policy, versions):
+        targets = [policy["target"], *policy.get("repository_current_targets", [])]
+        if not any(item["release"] == versions["freebsd_release"] and item["architecture"] == versions["architecture"]
+                   for item in targets):
+            raise InputError("Talk runtime differs from the exact native service targets.")
 
 
 def native_guard(public):
@@ -400,7 +429,7 @@ fail() { exit 1; }
 . "$PAYLOAD/resources/jails/versions.sh"
 version_load talk
 version_environment
-[ "$version_release" = 15.1-RELEASE ] && [ "$version_architecture" = amd64 ]
+[ "$version_architecture" = amd64 ]
 version_packages_check
 '''], timeout=60)
 
@@ -414,7 +443,7 @@ def payload_identity():
         current_requirements(value)
     result["runtime.json"] = hashlib.sha256(data).hexdigest()
     package_inputs = ("packages.requirements.json",) if current else ("packages.lock", "packages.dependencies")
-    module_inputs = ("installer/version_runtime.py", "installer/package_policy.py", "installer/versions.py") if current else ()
+    module_inputs = ("installer/version_runtime.py", "installer/package_policy.py", "installer/versions.py", "resources/versions.json") if current else ()
     for name in (*package_inputs, *module_inputs, "services.json",
                  "resources/native-services.json", "resources/jails/versions.sh",
                  "resources/jails/talk.sh", "resources/jails/talk-runtime.py", "installer/talk.py"):
@@ -871,8 +900,19 @@ def boot_runtime():
         raise InputError("Talk volatile runtime hook requires VNET.")
     release = native_command(["/bin/freebsd-version", "-u"], capture=True).strip()
     import re
-    if not re.fullmatch(r"15\.1-RELEASE(?:-p[0-9]+)?", release):
-        raise InputError("Unreviewed native runtime hook userland release.")
+    if re.fullmatch(r"15\.1-RELEASE(?:-p[0-9]+)?", release):
+        pass  # Retained strict15.1 boot contract does not require native pkg.
+    else:
+        match = re.fullmatch(r"([1-9][0-9]*)\.(0|[1-9][0-9]*)-(RELEASE(?:-p[0-9]+)?|STABLE|CURRENT)", release)
+        if not match or int(match[1]) < 15:
+            raise InputError("Unreviewed native runtime hook userland release.")
+        # Authenticate requirements and service policy before volatile writes.
+        runtime = json.loads(protected_read(PAYLOAD + "/runtime.json", private=True), object_pairs_hook=_unique)
+        if not repository_current(runtime["versions"]):
+            raise InputError("Native runtime hook requires authenticated repository-current requirements.")
+        validate_locked_payload(runtime)
+        if runtime["versions"]["freebsd_release"] != release.split("-p", 1)[0]:
+            raise InputError("Native runtime hook userland differs from its selected target.")
     accounts = service_accounts()
     for path, user in (("/var/run/cloud-janus", "cloudjanus"), ("/var/run/turnserver", "_turnserver")):
         secure_directory(path, *accounts[user], 0o750)

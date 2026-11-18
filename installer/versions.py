@@ -87,7 +87,8 @@ def package_upstream(value):
 
 
 def release_base(value):
-    text(value, NUMBER + r"\." + NUMBER + r"-RELEASE(?:-p" + NUMBER + r")?", "FreeBSD release (N.N-RELEASE[-pN])")
+    text(value, NUMBER + r"\." + NUMBER + r"-(?:RELEASE(?:-p" + NUMBER + r")?|STABLE|CURRENT)",
+         "FreeBSD release (N.N-RELEASE[-pN], N.N-STABLE or N.N-CURRENT)")
     return value.split("-p", 1)[0]
 
 
@@ -124,6 +125,55 @@ def target(policy, release, architecture):
             return deepcopy(item)
     supported = ", ".join(item["release"] + "/" + item["architecture"] for item in policy["targets"])
     raise ValueError(f"Unsupported target {release}/{architecture}; reviewed targets: {supported}")
+
+
+def repository_current_platform(policy):
+    """Only an explicit fresh-platform marker broadens exact target admission."""
+    value = policy.get("repository_current_platform")
+    if "repository_current_platform" in policy and (
+            not isinstance(value, dict) or set(value) != {"minimum_major", "architecture"}
+            or type(value.get("minimum_major")) is not int or value["minimum_major"] != 15
+            or value.get("architecture") != "amd64"):
+        raise ValueError("repository_current_platform requires minimum_major=15, architecture=amd64")
+    return value
+
+
+def repository_current_release(platform, release, architecture, *, normalized=False):
+    """Compare against a validated fresh-platform rule without loading policy.
+
+    Host selections may carry RELEASE patch suffixes; worker frames must already
+    contain the base identity. Callers retain their own policy/discriminator and
+    error-reporting boundaries.
+    """
+    base = release_base(release)
+    if ((normalized and base != release)
+            or int(base.split(".", 1)[0]) < platform["minimum_major"]
+            or architecture != platform["architecture"]):
+        raise ValueError("Requires FreeBSD 15 or higher (amd64), using a supported release listed by the installer")
+    return base
+
+
+def repository_current_target(policy, release, architecture):
+    """Fresh native target; no ABI override, repository fallback or key contents.
+
+    Unlisted targets require the ordinary OS pkg fingerprint as a prerequisite,
+    not as authentication of RELEASE pkgbase. Bastille's native --pkgbase owns
+    release-specific trust setup/verification and propagates any failure. Never
+    derive future RELEASE signing-key filenames. Listed targets keep exact bytes.
+    """
+    platform = repository_current_platform(policy)
+    if platform is None:
+        return target(policy, release, architecture)
+    base = repository_current_release(platform, release, architecture)
+    major = int(base.split(".", 1)[0])
+    abi = f"FreeBSD:{major}:amd64"
+    for item in policy["targets"]:
+        if (item["release"], item["architecture"]) == (base, architecture):
+            if item["abi"] != abi:
+                raise ValueError("Policy target ABI differs from its native release/architecture")
+            return deepcopy(item)
+    keys = ["/usr/share/keys/pkg/trusted/pkg.freebsd.org.2013102301"]
+    return {"release": base, "architecture": architecture, "abi": abi, "pkgbase_keys": keys}
 
 
 def office_backend(config):
@@ -183,7 +233,8 @@ def constraints(config, policy=None, *, repository_current=False, input_only=Fal
     if getattr(config, "_legacy_target", None):
         release, architecture = config._legacy_target.split("/")
         values["freebsd_release"], values["architecture"] = release, architecture
-    values["freebsd_release"] = target(policy, values["freebsd_release"], values["architecture"])["release"]
+    select_target = repository_current_target if repository_current or input_only else target
+    values["freebsd_release"] = select_target(policy, values["freebsd_release"], values["architecture"])["release"]
     for app in ("nextcloud",) if backend != "onlyoffice" else ("nextcloud", "onlyoffice"):
         if repository_current and app == "onlyoffice":
             continue
@@ -402,7 +453,8 @@ def _evidence(values):
 
 
 def validate_policy(policy):
-    object_fields(policy, ("schema_version", "defaults", "legacy_target", "targets", "fonts", "profiles", "evidence"), ("package_installation",), label="version policy")
+    object_fields(policy, ("schema_version", "defaults", "legacy_target", "targets", "fonts", "profiles", "evidence"), ("package_installation", "repository_current_platform"), label="version policy")
+    repository_current_platform(policy)
     if "package_installation" in policy:
         from .package_policy import repository_current
         repository_current(policy)
@@ -417,7 +469,7 @@ def validate_policy(policy):
     for item in policy["targets"]:
         object_fields(item, ("release", "architecture", "abi", "pkgbase_keys"), label="policy target")
         if release_base(item["release"]) != item["release"]:
-            raise ValueError("Policy targets must use an unpatched RELEASE base")
+            raise ValueError("Policy targets must use an unpatched release base")
         text(item["architecture"], r"[a-z0-9]+", "architecture")
         if item["abi"] != "FreeBSD:" + item["release"].split(".")[0] + ":" + item["architecture"]:
             raise ValueError("Policy target ABI does not match its release/architecture")
@@ -450,7 +502,7 @@ def validate_policy(policy):
         common = ("id", "targets", "applications", "dependency_policy", "php_suffix", "roles", "roots",
                   "php_extensions", "extension_ranges", "optional_roots")
         extra = ("office_backend",) if none else ("office_backend", "connector", "office_runtime", "evidence") if vm else ("connector", "onlyoffice_runtime")
-        object_fields(profile, common + extra, ("extension_origins",), label="profile")
+        object_fields(profile, common + extra, ("extension_origins", "repository_current_targets"), label="profile")
         groups = GROUPS if backend == "onlyoffice" else ("host", "nextcloud")
         text(profile["id"], NAME, "profile identifier")
         if profile["id"] in ids:
@@ -459,6 +511,11 @@ def validate_policy(policy):
         _root_list(profile["targets"], "profile targets")
         if not profile["targets"] or set(profile["targets"]) - targets:
             raise ValueError("Profile references an unknown target")
+        if "repository_current_targets" in profile:
+            _root_list(profile["repository_current_targets"], "repository-current profile targets")
+            if (backend != "onlyoffice" or not profile["repository_current_targets"]
+                    or set(profile["repository_current_targets"]) - targets):
+                raise ValueError("Repository-current native profile references an unknown target/backend")
         object_fields(profile["applications"], ("nextcloud", "onlyoffice") if backend == "onlyoffice" else ("nextcloud",), label="application ranges")
         for rule in profile["applications"].values():
             _range(rule)

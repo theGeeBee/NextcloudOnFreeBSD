@@ -341,8 +341,14 @@ for path in "${OO_ETC}/local.json" "${OO_ETC}/nginx/ds.conf" "${OO_ETC}/nginx/ds
 	"${OO_ETC}/supervisor/ds.conf" "${OO_ETC}/supervisor/ds-docservice.conf" "${OO_ETC}/supervisor/ds-metrics.conf"; do
 	[ -f "$path" ] && [ ! -L "$path" ] || fail "Unsupported actual ONLYOFFICE package layout: required configuration file is missing. Review the native adapter."
 done
-for path in /usr/local/bin/documentserver-update-securelink.sh \
-	/usr/local/bin/documentserver-generate-allfonts.sh /usr/local/bin/documentserver-flush-cache.sh \
+# Prefer the 9.4 helper names; 10.0 drops the .sh suffix.
+securelink_helper=/usr/local/bin/documentserver-update-securelink.sh
+[ -x "$securelink_helper" ] || securelink_helper=/usr/local/bin/documentserver-update-securelink
+allfonts_helper=/usr/local/bin/documentserver-generate-allfonts.sh
+[ -x "$allfonts_helper" ] || allfonts_helper=/usr/local/bin/documentserver-generate-allfonts
+cache_helper=/usr/local/bin/documentserver-flush-cache.sh
+[ -x "$cache_helper" ] || cache_helper=/usr/local/bin/documentserver-flush-cache
+for path in "$securelink_helper" "$allfonts_helper" "$cache_helper" \
 	"${OO_WWW}/server/DocService/docservice" "${OO_WWW}/server/Metrics/metrics" \
 	"${OO_WWW}/server/tools/allfontsgen" "${OO_WWW}/server/tools/allthemesgen" \
 	"${OO_WWW}/server/FileConverter/bin/x2t" "${OO_WWW}/npm/json"; do
@@ -375,7 +381,7 @@ if [ ! -f "${STATE}/securelink.done" ]; then
 			install -S -o root -g wheel -m 600 "${STATE}/backups/package-config.before/${name}" "${OO_ETC}/${name}"
 		done
 		# The port's --restart parser double-shifts; use the supported environment.
-		(umask 022; RESTART_CONDITION=false sh -e /usr/local/bin/documentserver-update-securelink.sh) \
+		(umask 022; RESTART_CONDITION=false sh -e "$securelink_helper") \
 			> "${LOGS}/securelink.log" 2>&1 || fail "Secure-link helper failed."
 	fi
 	python3 "$OFFICE" check-securelink > "${LOGS}/securelink-check.log" 2>&1 || fail "Secure-link secrets do not match."
@@ -393,11 +399,11 @@ if [ ! -f "${STATE}/fonts.json" ]; then
 	(umask 022; fc-cache -f) > "${LOGS}/font-cache.log" 2>&1 || fail "Fontconfig cache generation failed."
 	# -e exposes native generator failures that the vendor wrapper otherwise
 	# masks; true suppresses its obsolete converter/service restart branch.
-	(umask 022; sh -e /usr/local/bin/documentserver-generate-allfonts.sh true) > "${LOGS}/fonts.log" 2>&1 \
+	(umask 022; sh -e "$allfonts_helper" true) > "${LOGS}/fonts.log" 2>&1 \
 		|| fail "ONLYOFFICE font generation failed."
 	# Native 9.4.0_4 argument loops do not advance. Inherit restart suppression
 	# without arguments, as for secure-link generation; never spin on --restart.
-	(umask 022; RESTART_CONDITION=false sh -e /usr/local/bin/documentserver-flush-cache.sh) > "${LOGS}/cache.log" 2>&1 \
+	(umask 022; RESTART_CONDITION=false sh -e "$cache_helper") > "${LOGS}/cache.log" 2>&1 \
 		|| fail "ONLYOFFICE cache generation failed."
 	fc-list --format '%{file}\t%{family}\t%{style}\n' > "${STATE}/fontconfig.tsv" 2> "${LOGS}/fontconfig.log" \
 		|| fail "Font inventory failed."

@@ -1,15 +1,17 @@
-"""Unaccepted Alpine VM renderers and private native-key helpers.
+"""Alpine office VM renderers, native-key helpers and deployment adapters.
 
 Evidence: vm-bhyve v1.7.5 sample-templates/config.sample and cloud-init 26.1
 cc_ssh, DataSourceNoCloud, and net/network_state.py. Limine describes the image,
-not proven bhyve UEFI compatibility. Rendering never authenticates image bytes.
+not a boot-success guarantee. Rendering never authenticates image bytes.
 No import-time probes, image acquisition/disk creation or implicit startup occurs.
-Explicit stop/datastore withdrawal requires journal-bound storage identity and the
-existing global host lock; VM creation/start/deployment integration is not enabled.
+Explicit creation/start/stop/datastore withdrawal requires journal-bound storage
+identity and the existing global host lock; fresh VM deployment is implemented.
 Renderers remain pure. Native key generation/verification is explicit through the
 existing Runner, never a private-key parser or an SSH management framework.
-Seed files, ISO and cached user-data remain private secrets. No VM execution or
-backend policy approval is enabled by these helpers.
+Seed files, ISO and cached user-data remain private secrets. Historical
+``unaccepted``/``candidate`` function names are retained APIs, not availability
+gates. Adapter availability is not native acceptance evidence: dated C8/C11 runs
+cover their artifacts, not every later candidate (see docs/fresh-install-profiles.md).
 """
 
 import base64
@@ -1970,8 +1972,10 @@ except (AssertionError,OSError,ValueError):
 
 
 def render_vm_boot_service(config, artifact_root, *, source_sha256):
-    """Pure, not installed: boot through the original verified installer worker.
+    """Pure rc renderer: boot through the original verified installer worker.
 
+    This function does not install the service; publish_vm_boot_service publishes
+    it only after the required integration/restart/readiness checks.
     vm-bhyve1.7.5 ignores prestart's return status. Leave its vm_list empty and
     use an explicit rc command instead, after Bastille/network/VM initialization.
     Moving/removing/changing the artifact fails closed; boot does not reselect.

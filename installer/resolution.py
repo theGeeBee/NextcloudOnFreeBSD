@@ -8,7 +8,7 @@ from . import compatibility, package_policy, services
 from .versions import (FIELDS, NC_FIELDS, GROUPS, NAME, TRIPLE, VM_BACKENDS, VM_ROLES, CONNECTOR_APPS, constraints, load_policy,
                        object_fields, office_backend, package_upstream, package_version, policy_hash, release_base, selected_profiles,
                        satisfies, stable_version, target, text, validate_policy, validate_office_runtime, validate_runtime_artifacts,
-                       latest_nextcloud)
+                       latest_nextcloud, repository_current_target)
 
 
 NATIVE_WARNING = "Source/catalog review only; native FreeBSD/QEMU acceptance has not been performed."
@@ -170,6 +170,13 @@ def _plan_inventory(plan):
         groups += ("talk",)
     object_fields(plan["target"], ("release", "architecture", "abi", "pkgbase_keys"), label="plan target")
     release = release_base(plan["target"]["release"])
+    if current:
+        # Structural retained inventory stays pure and does not consult today's
+        # policy. validate_plan binds the actual authenticated policy separately.
+        if int(release.split(".", 1)[0]) < 15 or plan["target"]["architecture"] != "amd64":
+            raise ValueError("Fresh plan requires FreeBSD 15 or higher (amd64)")
+    elif not release.endswith("-RELEASE"):
+        raise ValueError("Historical strict plans require their original reviewed target")
     text(plan["target"]["architecture"], r"[a-z0-9]+", "plan architecture")
     expected_abi = "FreeBSD:" + release.split(".")[0] + ":" + plan["target"]["architecture"]
     if plan["target"]["release"] != release or plan["target"]["abi"] != expected_abi:
@@ -315,7 +322,8 @@ def validate_plan(config, plan, policy=None):
     effective = constraints(config, policy, repository_current=current)
     if current:
         effective = package_policy.normalize_plan_constraints(config, effective, policy)
-    if plan["constraints"] != effective or plan["target"] != target(policy, effective["freebsd_release"], effective["architecture"]):
+    select_target = repository_current_target if current else target
+    if plan["constraints"] != effective or plan["target"] != select_target(policy, effective["freebsd_release"], effective["architecture"]):
         raise ValueError("Retained resolution constraints or target changed")
     discovered = {"schema_version": plan["schema_version"], "target": plan["target"], "repository": plan["repository"],
                   "nextcloud": [plan["applications"]["nextcloud"]], "packages": packages,

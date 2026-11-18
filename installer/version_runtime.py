@@ -61,10 +61,19 @@ def validate_runtime_versions(value):
                   if key not in ("packages_sha256", "dependencies_sha256")}
         fields.update(package_installation=r"pkg", requirements_sha256=r"[a-f0-9]{64}")
         fields.update({key: "(?:" + _PACKAGE_VERSION + ")?" for key in ("php", "database", "onlyoffice") if key in fields})
+        if value.get("app_installation") == "occ":
+            fields["freebsd_release"] = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)-(?:RELEASE|STABLE|CURRENT)"
     if not isinstance(value, dict) or set(value) != set(fields):
         raise ValueError("The runtime requires an exact public versions object")
     if any(not _safe(value[key], pattern, 128) for key, pattern in fields.items()):
         raise ValueError("Invalid public version, release, package name or digest")
+    if int(value["freebsd_release"].split(".", 1)[0]) < 15:
+        raise ValueError("Runtime requires FreeBSD 15 or higher")
+    # Wire validation also runs in the minimal staged Talk package. Keep it
+    # independent of resource/path loading: authenticated policy admission is
+    # performed separately by the worker before package/volatile-state actions.
+    if value.get("package_installation") == "pkg" and value["architecture"] != "amd64":
+        raise ValueError("Fresh runtime requires amd64")
     if backend in ('eurooffice', 'collabora') and "app_installation" not in value and value['connector_app'] != {'eurooffice':'eurooffice','collabora':'richdocuments'}[backend]:
         raise ValueError("Runtime connector ID does not match office backend")
     return dict(value)

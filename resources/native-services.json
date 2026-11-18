@@ -2,6 +2,8 @@
   "schema_version": 1,
   "profile": "native-v1",
   "target": {"release": "15.1-RELEASE", "architecture": "amd64"},
+  "repository_current_targets": [{"release": "15.2-STABLE", "architecture": "amd64"}, {"release": "16.0-CURRENT", "architecture": "amd64"}],
+  "repository_current_platform": {"minimum_major": 15, "architecture": "amd64"},
   "nextcloud": {"family": "35"},
   "php": {"family": "8.5"},
   "push": {
