@@ -2,8 +2,22 @@
 
 # NextcloudOnFreeBSD
 
-Set up Nextcloud on FreeBSD with ZFS storage, private networking and HTTPS.
-A terminal wizard guides you through installation.
+**An integrated Nextcloud installer for FreeBSD.**
+
+NextcloudOnFreeBSD sets up **Nextcloud 35** by default and its supporting services
+through one guided installer. Think of it as an AIO-style setup experience built
+around FreeBSD: ZFS storage, isolated jails, HTTPS, and optional office and Talk services.
+
+Nextcloud runs natively in a FreeBSD jail. Choose native ONLYOFFICE, or Euro-Office
+or Collabora CODE in a dedicated Linux VM. The installer handles their configuration
+and connections.
+
+This is an independent project—not official Nextcloud AIO or a FreeBSD port of it.
+It focuses on installation and integration; ongoing updates and backups remain
+under your control.
+
+See the [comparison with Nextcloud AIO](https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Nextcloud-AIO-comparison)
+and [architecture guide](https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Architecture).
 
 **Stable release: v1.0.1.** Bug fixes, ONLYOFFICE 10 support and FreeBSD 15+
 support for new deployments. See the [release notes and downloads](https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.1).
