@@ -67,6 +67,15 @@ nav a { display: inline-flex; align-items: center; min-height: 44px; color: var(
 .profile-detail { border-top: 1px solid var(--line); padding-top: 1rem; margin-top: auto; color: var(--muted); }
 .service-note { margin-top: 1.5rem; padding: 1.5rem; background: var(--wash); border-left: 4px solid #78942f; }
 .service-note p { max-width: 85ch; }
+.comparison-scroll { overflow-x: auto; }
+.comparison-scroll:focus-visible { outline: 3px solid #47701c; outline-offset: 5px; }
+.comparison-table { width: 100%; min-width: 38rem; border-collapse: collapse; }
+.comparison-table caption { text-align: left; margin-bottom: 1rem; color: var(--muted); }
+.comparison-table th, .comparison-table td { padding: 1rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.comparison-table th { font-weight: 500; background: var(--wash); }
+.comparison-table th:first-child { width: 20%; }
+.comparison-table td { width: 40%; }
+.comparison-note { margin-top: 1rem; max-width: 75ch; color: var(--muted); }
 .showcase-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; }
 .showcase-grid figure { margin: 0; min-width: 0; }
 .showcase-grid img { display: block; width: 100%; height: auto; border: 1px solid var(--line); }

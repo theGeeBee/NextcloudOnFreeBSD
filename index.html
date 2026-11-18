@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Install Nextcloud on FreeBSD 15+ with isolated jails, ZFS, HTTPS and optional integrated office services.">
+  <meta name="description" content="An independent, integrated Nextcloud installer for FreeBSD. Set up Nextcloud 35 by default with ZFS, isolated jails, HTTPS and optional office and Talk services.">
   <title>NextcloudOnFreeBSD — v1.0.1</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
   <link rel="stylesheet" href="styles.css">
@@ -29,7 +29,7 @@
         <div class="hero-copy">
           <p class="eyebrow">v1.0.1 · Stable release</p>
           <h1 id="hero-title">Your cloud.<br>On FreeBSD.</h1>
-          <p class="lead">Install Nextcloud on FreeBSD 15+ with isolated jails, ZFS, HTTPS and optional integrated office services.</p>
+          <p class="lead">An integrated Nextcloud installer for FreeBSD. Set up <strong>Nextcloud 35</strong> by default, with its supporting services, through one guided installer.</p>
           <div class="actions">
             <a class="button button-primary" href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Installation-Guide">Read the installation guide</a>
             <a class="button button-secondary" href="https://github.com/theGeeBee/NextcloudOnFreeBSD#readme">View the README</a>
@@ -41,6 +41,17 @@
           <img src="assets/logoheader.png" width="1774" height="887" alt="Nextcloud on FreeBSD green daemon and cloud logo">
           <p>FreeBSD foundations. Nextcloud services.</p>
         </div>
+      </div>
+    </section>
+
+    <section class="section container" id="about" aria-labelledby="about-title">
+      <div class="section-heading">
+        <p class="eyebrow">What is NextcloudOnFreeBSD?</p>
+        <h2 id="about-title">One guided setup. Built around FreeBSD.</h2>
+        <p>Think of it as an AIO-style setup experience for FreeBSD: ZFS storage, isolated jails, HTTPS, and optional office and Talk services. The installer handles their configuration and connections.</p>
+        <p>Nextcloud runs natively in a FreeBSD jail. Choose native ONLYOFFICE, or Euro-Office or Collabora CODE in a dedicated Linux VM—or use Nextcloud on its own.</p>
+        <p>This is an independent project—not official Nextcloud AIO or a FreeBSD port of it. It focuses on installation and integration; ongoing updates and backups remain under your control.</p>
+        <p><a href="#comparison">Compare with official Nextcloud AIO</a> or explore the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Architecture">architecture</a>.</p>
       </div>
     </section>
 
@@ -81,6 +92,29 @@
         <p>Client Push helps Nextcloud desktop clients notice file changes sooner. Optional Talk adds calls and chat, with its own dedicated jail. It needs additional ports for calls.</p>
         <p>Connect existing SFTP or HTTP/HTTPS storage with <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/External-Storage">External files</a>. It is off by default and works with any office choice, with or without Talk. Set up connections in Nextcloud after installation.</p>
       </div>
+    </section>
+
+    <section class="section container" id="comparison" aria-labelledby="comparison-title">
+      <div class="section-heading">
+        <p class="eyebrow">Compared with official Nextcloud AIO</p>
+        <h2 id="comparison-title">Similar goal, different approach.</h2>
+        <p>Both simplify setting up Nextcloud and its supporting services. Our installer focuses on FreeBSD installation and integration; AIO also manages ongoing updates and backups.</p>
+      </div>
+      <div class="comparison-scroll" role="region" aria-label="Nextcloud AIO comparison table" tabindex="0">
+        <table class="comparison-table">
+          <caption>New deployments: NextcloudOnFreeBSD v1.0.1 and official Nextcloud AIO</caption>
+          <thead><tr><th scope="col">Area</th><th scope="col">NextcloudOnFreeBSD</th><th scope="col">Official Nextcloud AIO</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Foundation</th><td>FreeBSD 15+ (amd64), native jails, MariaDB and ZFS datasets</td><td>Docker Linux containers, PostgreSQL and Docker volumes</td></tr>
+            <tr><th scope="row">Setup</th><td>Terminal wizard or JSON recipe</td><td>Mastercontainer with a web management interface</td></tr>
+            <tr><th scope="row">Office</th><td>Native ONLYOFFICE; optional Euro-Office or Collabora CODE in a Linux VM</td><td>Optional Nextcloud Office/Collabora or EuroOffice containers</td></tr>
+            <tr><th scope="row">Multiple instances</th><td>Built-in instance separation, with private networks and storage</td><td>Documented separate VMs or rootless Docker users, with distinct ports</td></tr>
+            <tr><th scope="row">Updates</th><td>Operator-managed; no upgrade assistant for new deployments</td><td>Integrated updates, with optional automation</td></tr>
+            <tr><th scope="row">Backup and restore</th><td>Operator-managed; no integrated backup/restore for new deployments</td><td>Integrated BorgBackup, scheduling and restoration</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="comparison-note">Documentation-based comparison, reviewed November 18, 2026—not a hands-on AIO test. Retained datasets are not backups. <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Nextcloud-AIO-comparison">Read the full comparison and official sources</a>.</p>
     </section>
 
     <section class="section container" id="showcase" aria-labelledby="showcase-title">
