@@ -5,11 +5,8 @@
 Set up Nextcloud on FreeBSD with ZFS storage, private networking and HTTPS.
 A terminal wizard guides you through installation.
 
-**v1.0.1 — private, unpublished candidate.** This checkout is being prepared for
-review; v1.0.1 has not been published.
-
-**Published release: v1.0.0.** Get its versioned archive and checksum-verified installation command
-from the [release page](https://github.com/theGeeBee/NextcloudOnFreeBSD/releases).
+**Stable release: v1.0.1.** Bug fixes, ONLYOFFICE 10 support and FreeBSD 15+
+fresh installation. See the [release notes and downloads](https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.1).
 
 [Repository](https://github.com/theGeeBee/NextcloudOnFreeBSD) ·
 [Website](https://theGeeBee.github.io/NextcloudOnFreeBSD/) ·
@@ -36,8 +33,6 @@ be attempted; unavailable or incompatible software may fail to install.
 
 ## Requirements
 
-For the current checkout (private, unpublished v1.0.1 candidate):
-
 - **Requires FreeBSD 15 or later (amd64).**
 - ZFS and root access outside a jail.
 - A fixed host/LAN IPv4 address, a public hostname and working DNS.
@@ -48,11 +43,9 @@ For the current checkout (private, unpublished v1.0.1 candidate):
 - Console recovery access and a second SSH connection.
 
 *Tested on FreeBSD 15.1-RELEASE, 15.2-STABLE and 16-CURRENT.*
-Version tests are artifact-specific, not a complete v1.0.1 backend/package matrix.
 
-This checkout admits FreeBSD 15+ RELEASE, STABLE and CURRENT versions for fresh
-installation. Use a maintained RELEASE for production. The published v1.0.0
-archive remains unchanged and requires FreeBSD 15.1-RELEASE amd64.
+Fresh installation accepts FreeBSD 15+ RELEASE, STABLE and CURRENT versions.
+Use a maintained RELEASE for production.
 
 HTTPS can use Let's Encrypt, supplied certificates or an external reverse proxy.
 The [installation guide](https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Installation-Guide)

@@ -1,12 +1,12 @@
 #!/bin/sh
-# Checksum-pinned transport for NextcloudOnFreeBSD v1.0.0.
+# Checksum-pinned transport for NextcloudOnFreeBSD v1.0.1.
 # Verify/retain the exact reviewed archive, then hand off to its unchanged install.sh.
 # No provisioning logic or prerequisite installation here.
 set +x
 set +v
 set -eu
 [ "$#" -eq 0 ] || { printf '%s\n' 'Usage: sh bootstrap.sh (fresh installation only)' >&2; exit 1; }
-set -- 'https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/download/v1.0.0-20261116/NextcloudOnFreeBSD-1.0.0.tar.gz' 'a39585ed3da672fa09c6af0620066e02f48fd329428b97813f6cb11193197763'
+set -- 'https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/download/v1.0.1/NextcloudOnFreeBSD-1.0.1.tar.gz' '7efb7f9ea9400b1bde36b92b386d539c3235703582141a9cb801c7ce07120493'
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 export PATH
 unset SSL_NO_VERIFY_PEER SSL_NO_VERIFY_HOSTNAME SSL_ALLOW_SSL3 TAR_OPTIONS TAR_READER_OPTIONS TAR_WRITER_OPTIONS
