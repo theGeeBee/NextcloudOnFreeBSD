@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="An independent, integrated Nextcloud installer for FreeBSD. Set up Nextcloud 35 by default with ZFS, isolated jails, HTTPS and optional office and Talk services.">
-  <title>NextcloudOnFreeBSD — v1.0.1</title>
+  <title>NextcloudOnFreeBSD — v1.1.0</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -27,20 +27,75 @@
     <section class="hero" aria-labelledby="hero-title">
       <div class="container hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow">v1.0.1 · Stable release</p>
+          <p class="eyebrow">v1.1.0 · Stable release</p>
           <h1 id="hero-title">Your cloud.<br>On FreeBSD.</h1>
           <p class="lead">An integrated Nextcloud installer for FreeBSD. Set up <strong>Nextcloud 35</strong> by default, with its supporting services, through one guided installer.</p>
           <div class="actions">
             <a class="button button-primary" href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Installation-Guide">Read the installation guide</a>
             <a class="button button-secondary" href="https://github.com/theGeeBee/NextcloudOnFreeBSD#readme">View the README</a>
           </div>
-          <p class="hero-note">Get the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.1">v1.0.1 release page</a>.</p>
+          <p class="hero-note">Get the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.1.0">v1.1.0 release page</a>. <a href="#whats-new">See what’s new</a>.</p>
           <p class="platform">Requires FreeBSD 15 or later (amd64)</p>
         </div>
         <div class="logo-panel">
           <img src="assets/logoheader.png" width="1774" height="887" alt="Nextcloud on FreeBSD green daemon and cloud logo">
           <p>FreeBSD foundations. Nextcloud services.</p>
         </div>
+      </div>
+    </section>
+
+    <section class="section container" id="features" aria-labelledby="features-title">
+      <div class="section-heading">
+        <p class="eyebrow">Features at a glance</p>
+        <h2 id="features-title">Choose what your cloud runs.</h2>
+        <p>Set up the services you need on FreeBSD, with a plan you can review before installing.</p>
+      </div>
+      <div class="feature-grid">
+        <article class="profile">
+          <h3>Guided or recipe-based</h3>
+          <p>Use the terminal wizard or a JSON recipe. Choose Nextcloud, PHP and MariaDB versions and how to serve HTTPS. Opt out of project branding in the wizard or recipe.</p>
+          <p class="profile-detail"><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Unattended-CLI-install">Explore JSON recipes</a></p>
+        </article>
+        <article class="profile">
+          <h3>Isolated on FreeBSD</h3>
+          <p>Nextcloud runs in a native jail with its own ZFS datasets and private network. A prepared host can also run existing jails, independently managed VMs and multiple Nextcloud instances.</p>
+          <p class="profile-detail"><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Coexistence">Check host requirements</a></p>
+        </article>
+        <article class="profile">
+          <h3>Office, apps and storage</h3>
+          <p>Choose native ONLYOFFICE, Euro-Office or Collabora CODE in an Alpine VM, or Nextcloud only. Client Push is included; Talk, other apps and external SFTP or HTTP/HTTPS storage are optional.</p>
+          <p class="profile-detail"><a href="#profiles">Compare the four office choices</a></p>
+        </article>
+      </div>
+      <div class="release-features" id="whats-new" aria-labelledby="whats-new-title">
+        <div class="section-heading">
+          <p class="eyebrow">New in v1.1.0</p>
+          <h3 id="whats-new-title">What’s new in this release</h3>
+          <p>More control over setup and maintenance, without handing the installer control of your host.</p>
+        </div>
+        <div class="feature-grid release-feature-grid">
+          <article class="profile">
+            <h4>See what needs attention</h4>
+            <p>Open the terminal dashboard for recorded status. Verify checks live services. Self-update changes only the installer, and eligible instances can review and approve native package updates.</p>
+            <p class="profile-detail"><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Software-Versions#maintain-a-completed-installation-v11">View maintenance commands</a></p>
+          </article>
+          <article class="profile">
+            <h4>Keep your other VMs running</h4>
+            <p>Collabora and Euro-Office can use an existing vm-bhyve manager. The installer starts, stops and unregisters only its own office VM. Its disk stays on the host by default after uninstall.</p>
+            <p class="profile-detail"><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Coexistence#other-bhyve-guests">See how VMs coexist</a></p>
+          </article>
+          <article class="profile">
+            <h4>Set up the way you want</h4>
+            <p>Use the host’s DHCP-assigned IPv4 address, list apps and plugins in any order, or keep Nextcloud’s original branding from the wizard. A DHCP reservation keeps forwarding stable.</p>
+            <p class="profile-detail"><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Installation-Guide#using-dhcp-on-the-freebsd-host">Read the DHCP setup guide</a></p>
+          </article>
+          <article class="profile">
+            <h4>Keep signature verification when a download fails</h4>
+            <p>If the primary Nextcloud signing-key download fails, the installer can retrieve the same pinned key over HTTPS from Ubuntu’s keyserver. It still verifies the full fingerprint and release signature.</p>
+            <p class="profile-detail"><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Software-Versions#choose-versions">Read how downloads are verified</a></p>
+          </article>
+        </div>
+        <p class="release-notes-link"><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.1.0">Read the v1.1.0 release notes</a></p>
       </div>
     </section>
 
@@ -102,14 +157,14 @@
       </div>
       <div class="comparison-scroll" role="region" aria-label="Nextcloud AIO comparison table" tabindex="0">
         <table class="comparison-table">
-          <caption>New deployments: NextcloudOnFreeBSD v1.0.1 and official Nextcloud AIO</caption>
+          <caption>New deployments: NextcloudOnFreeBSD v1.1.0 and official Nextcloud AIO</caption>
           <thead><tr><th scope="col">Area</th><th scope="col">NextcloudOnFreeBSD</th><th scope="col">Official Nextcloud AIO</th></tr></thead>
           <tbody>
             <tr><th scope="row">Foundation</th><td>FreeBSD 15+ (amd64), native jails, MariaDB and ZFS datasets</td><td>Docker Linux containers, PostgreSQL and Docker volumes</td></tr>
             <tr><th scope="row">Setup</th><td>Terminal wizard or JSON recipe</td><td>Mastercontainer with a web management interface</td></tr>
             <tr><th scope="row">Office</th><td>Native ONLYOFFICE; optional Euro-Office or Collabora CODE in a Linux VM</td><td>Optional Nextcloud Office/Collabora or EuroOffice containers</td></tr>
             <tr><th scope="row">Multiple instances</th><td>Built-in instance separation, with private networks and storage</td><td>Documented separate VMs or rootless Docker users, with distinct ports</td></tr>
-            <tr><th scope="row">Updates</th><td>Operator-managed; no upgrade assistant for new deployments</td><td>Integrated updates, with optional automation</td></tr>
+            <tr><th scope="row">Updates</th><td>Installer self-update and attended jail and VM package updates; Nextcloud core and host OS remain operator-managed</td><td>Integrated updates, with optional automation</td></tr>
             <tr><th scope="row">Backup and restore</th><td>Operator-managed; no integrated backup/restore for new deployments</td><td>Integrated BorgBackup, scheduling and restoration</td></tr>
           </tbody>
         </table>
@@ -148,13 +203,13 @@
               <li>Working bhyve hardware or nested virtualization for Euro-Office and Collabora CODE.</li>
               <li>An interactive terminal, console recovery access and a second SSH session.</li>
             </ul>
-            <p class="tested-note">Tested on FreeBSD 15.1-RELEASE, 15.2-STABLE and 16-CURRENT.</p>
-            <p>A clean or dedicated FreeBSD host is not required. Install alongside existing jails on a suitably configured host; see the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Coexistence">host preparation guide</a> for networking, PF and resource-conflict requirements. The installer creates new deployments; it does not adopt or upgrade existing Nextcloud installations.</p>
+            <p class="tested-note">v1.1.0 runtime qualified on FreeBSD 15.1-RELEASE. Earlier default-profile tests also covered 15.2-STABLE and 16-CURRENT.</p>
+            <p>A clean or dedicated FreeBSD host is not required. Install alongside existing jails and independently managed VMs on a prepared host; see the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Coexistence">host preparation guide</a> for networking, PF and resource-conflict requirements. The installer creates new deployments; it does not adopt or upgrade existing Nextcloud installations.</p>
           </div>
           <div>
             <h3>Networking &amp; HTTPS</h3>
             <ul>
-              <li>A fixed IPv4 address for your FreeBSD host—its LAN address if behind a router—plus working DNS and Internet access.</li>
+              <li>An assigned IPv4 address for your FreeBSD host, static or DHCP, plus working DNS and Internet access. Reserve the host address if using DHCP.</li>
               <li>A public hostname for your Nextcloud server.</li>
               <li>Let's Encrypt, supplied certificates, or an external HTTPS reverse proxy.</li>
               <li>Port forwarding for HTTPS and, if selected, Talk. See the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Installation-Guide#port-forwarding">network setup instructions</a>.</li>
@@ -179,7 +234,7 @@
         <p>The wizard walks you through setup. Stay at your terminal to review settings and confirm network access.</p>
       </div>
       <ol class="steps">
-        <li><h3>Get the installer</h3><p>Download and unpack the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.0.1">v1.0.1 release page</a>. Keep its directory for Resume, recovery and removal.</p></li>
+        <li><h3>Get the installer</h3><p>Download and unpack the installer from the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/tag/v1.1.0">v1.1.0 release page</a>. Keep its directory for Resume, recovery and removal.</p></li>
         <li><h3>Choose your services</h3><p>Run this from the installer directory as root. The wizard covers storage, networking, HTTPS and applications, and asks before installing missing pkg/Python prerequisites.</p><pre><code>sh install.sh install</code></pre></li>
         <li><h3>Set up port forwarding</h3><p>Forward the selected web and Talk ports to the FreeBSD host, not its private jails or VM, using the values in your installation plan. An external HTTPS proxy changes the web route; follow the <a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/wiki/Installation-Guide#port-forwarding">port-forwarding guide</a> for the details. The installer does not configure your router.</p></li>
         <li><h3>Review and install</h3><p>Check your settings and choose <code>APPLY</code>. When prompted, open a new SSH connection to check access, then enter <code>KEEP</code> before the timer expires.</p></li>
@@ -230,10 +285,10 @@ sh install.sh install --config /root/nextcloud-install.json</code></pre>
     </section>
 
     <section class="section container limits" aria-labelledby="limits-title">
-      <h2 id="limits-title">Plan for ongoing care.</h2>
+      <h2 id="limits-title">Maintain your installation.</h2>
       <ul>
-        <li>The installer's backup/restore commands and upgrade assistant are unavailable for new installations. Manage updates and maintain your own backups.</li>
-        <li>Uninstall can save a database/configuration copy for manual recovery. It excludes user files and cannot be used with the installer's Restore command.</li>
+        <li>Use the installer for attended jail and office VM package updates on eligible deployments. Manage Nextcloud core, the host OS and jail bases, and Docker images separately, and keep tested backups.</li>
+        <li>Before uninstalling, you can export the database and configuration for manual recovery. This export does not include user files and is not a full backup.</li>
       </ul>
     </section>
     <section class="container thanks" aria-labelledby="thanks-title">
@@ -245,7 +300,7 @@ sh install.sh install --config /root/nextcloud-install.json</code></pre>
   </main>
   <footer class="site-footer">
     <div class="container footer-row">
-      <p>NextcloudOnFreeBSD · v1.0.1<br>© 2026 Gibran Khan. Upstream licenses and trademarks remain with their owners.</p>
+      <p>NextcloudOnFreeBSD · v1.1.0<br>© 2026 Gibran Khan. Upstream licenses and trademarks remain with their owners.</p>
       <div><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD">Source on GitHub</a><a href="https://github.com/theGeeBee/NextcloudOnFreeBSD/blob/main/LICENSE">BSD 3-Clause license</a></div>
     </div>
   </footer>
