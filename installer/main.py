@@ -10,7 +10,7 @@ import stat
 import subprocess
 import sys
 
-from .config import Config, OFFICE_LABELS, STATE_DIR, deployment_plan
+from .config import Config, DHCP_NOTICE, OFFICE_LABELS, STATE_DIR, deployment_plan
 from .deploy import Deployment
 from .host import Runner, inspect_host, preflight, read_private, require_host
 from .state import Registry, atomic_json, private_json
@@ -146,7 +146,7 @@ def load_config_file(path):
         # interpretation and omission defaults in Config.from_json unchanged.
         text = data.decode("utf-8")
         json.loads(text, object_pairs_hook=unique_object)
-        return Config.from_json(text)
+        return Config.from_json(text, recipe=True)
     except (OSError, ValueError, TypeError, RecursionError, OverflowError):
         raise ValueError("Cannot load configuration file: use a valid schema-2 JSON regular file owned by the operator, at most 1 MiB, without symlinks or group/other writes") from None
 
@@ -282,9 +282,13 @@ def argument_parser():
     install.add_argument("--accept-licenses", action="store_true", help="Accept the required Microsoft webfonts EULA; does not select features")
     install.add_argument("--accept-acme-terms", action="store_true", help="Accept Let's Encrypt ACME terms for this invocation")
     commands.add_parser("list", help="List registered instances")
+    update_installer = commands.add_parser("self-update", help="Select a verified installer release without changing instances")
+    update_installer.add_argument("--rollback", action="store_true", help="Select the previous retained installer instead")
     commands.add_parser("recover-network", help="Recover an expired/reboot-interrupted unconfirmed PF transaction")
     for name in ("resume", "status", "verify", "add-user", "recover-install"):
         commands.add_parser(name).add_argument("instance")
+    commands.add_parser("update-jails", help="Attended FreeBSD ports updates in owned jails").add_argument("instance")
+    commands.add_parser("update-vm", help="Attended Alpine package updates in the owned office VM").add_argument("instance")
     remove = commands.add_parser("remove", help="Remove jail roots/networking; retain application datasets by default")
     remove.add_argument("instance")
     remove.add_argument("--purge-data", action="store_true", help="Also permanently destroy instance datasets and snapshots")
@@ -418,12 +422,12 @@ def main(argv=None):
         if args.save_report and not args.refresh:
             parser.error("--save-report requires --refresh; viewing cached reports never writes")
     if args.command == "plan":
-        print(deployment_plan(Config.from_json(args.config.read_text())))
+        print(deployment_plan(Config.from_json(args.config.read_text(), recipe=True)))
         return 0
     if args.command == "resolve":
         from .discovery import discover, probe_packages
         from .resolution import resolve, assess_upgrade
-        config = Config.from_json(args.config.read_text())
+        config = Config.from_json(args.config.read_text(), recipe=True)
         if args.metadata:
             if args.metadata.stat().st_size > 16 * 1024 * 1024:
                 raise ValueError("Saved discovery metadata exceeds its size limit")
@@ -482,9 +486,10 @@ def main(argv=None):
         from .dashboard import snapshot, render
         from .updates import check_updates
         view = snapshot(registry)
-        names = [row["instance"] for row in view["instances"] if not row["error"] and row["state"] != "removed"]
+        names = [row["instance"] for row in view["instances"] if not row["error"]
+                 and row["state"] != "removed" and row["legacy_advisory"]]
         reports = check_updates(registry, names) if names else None
-        ui.message(render(view, host_release=runner.output("freebsd-version", "-u"), updates=reports))
+        ui.message(render(view, updates=reports))
         args = menu(ui, registry, view=view)
         if args.command not in ("list", "status"):
             registry.require_ownership()
@@ -504,6 +509,9 @@ def main(argv=None):
         return show_updates(args, registry, runner, ui)
     if args.command == "check-security":
         return show_security(args, registry, ui)
+    if args.command == "remove":
+        from .legacy_remove import delegate
+        delegate(registry, ui, args, plain=plain)
     with registry.locked():
         require_host_controls_resolved(registry)
         from .firewall import pending_transactions, recover_pending
@@ -526,6 +534,10 @@ def main(argv=None):
             return 0
         if pending and args.command not in ("list", "status"):
             raise ValueError("An unconfirmed network transaction remains. Allow its watchdog to finish, or use recover-network after expiry/reboot")
+        if args.command == "self-update":
+            from .self_update import run
+            run(registry, ui, rollback=getattr(args, "rollback", False))
+            return 0
         if args.command == "upgrade":
             return dispatch_upgrade(args, registry, runner, ui)
         if args.command == "list":
@@ -584,8 +596,25 @@ def main(argv=None):
                 config.require_native_backend(args.command)
             from .maintenance import require_instance_adapter
             require_instance_adapter(registry, args.instance)
+            if args.command in ("update-jails", "update-vm"):
+                deployment = Deployment(config, {}, runner, registry=registry, progress=ui.progress)
+                if args.command == "update-vm":
+                    from .office_vm import update_vm_packages
+                    report = update_vm_packages(deployment, ui)
+                else:
+                    from .jail_updates import update_jails
+                    report = update_jails(deployment, ui)
+                return int(report["state"] not in ("completed", "cancelled"))
             state = registry.instance_path(config.instance)
             status = registry.status(config.instance)["state"]
+            if args.command == "remove":
+                from .legacy_remove import require_local_removal
+                require_local_removal(registry, config.instance)
+            if args.command == "resume":
+                from .deploy import source_digest
+                original = registry.evidence_path(config.instance, "source.sha256")
+                if os.path.lexists(original) and read_private(original) != source_digest():
+                    raise ValueError("Resume requires the original installer artifact that started this instance")
             if args.command == "status":
                 show_status(registry, config.instance)
                 return 0
@@ -652,6 +681,7 @@ def main(argv=None):
             elif not (ui.authorize_apply("This changes host storage/networking and provisions the reviewed instance.\n"
                                          f"Instance: {config.instance}\nURL: {config.public_url}\n"
                                          "Keep console and a second SSH session available. Timed KEEP remains mandatory.\n"
+                                         f"{DHCP_NOTICE}\n"
                                          "Cancel saves configuration without provisioning.") if getattr(ui, "dialog", None) else
                       ui.input("Type APPLY to proceed") == "APPLY"):
                 ui.message("Saved only; no provisioning performed.")
@@ -1022,50 +1052,52 @@ def show_security(args, registry, ui):
 
 
 def menu(ui, registry, *, view=None):
-    from .dashboard import snapshot
+    from .dashboard import render, snapshot
     view = snapshot(registry) if view is None else view
     rows = [row for row in view["instances"] if not row["error"]]
     allowed = {
         "status": rows,
         "resume": [row for row in rows if row["state"] in ("configured", "installing", "failed")],
-        "remove": [row for row in rows if row["state"] != "configured"],
         "recover-install": [row for row in rows if row["state"] in ("failed", "installing")],
     }
-    for action in ("verify", "backup", "restore", "add-user", "upgrade"):
-        allowed[action] = [row for row in rows if row["state"] == "ready"
-                           and (not row["pending"] or action == "restore" and row["pending"] == ["database restore"])]
+    for action in ("remove", "update-jails", "update-vm", "backup", "restore", "upgrade", "maintenance-register"):
+        allowed[action] = [row for row in rows if action in row["actions"]]
+    for action in ("verify", "add-user"):
+        allowed[action] = [row for row in rows if row["state"] == "ready" and not row["pending"]]
     choices = []
     unsafe = bool(view["errors"] or any(row["error"] for row in view["instances"]))
     blocked = unsafe or bool(view["pending_network"])
     if any(row["state"] != "removed" for row in view["instances"]):
-        choices.append(("check-updates", "Check updates (report only)"))
+        choices.append(("check-updates", "Check legacy update reports"))
         choices.append(("check-security", "Security advisories"))
     if not blocked:
         choices.extend([("install", "Install an instance"), ("configure", "Configure only")])
+    if view["self_update"]:
+        choices.append(("self-update", "Update the installer"))
     choices.append(("list", "List registered instances"))
     if registry.lifecycle_enabled():
         choices.extend([("maintenance-status", "Inspect lifecycle state"),
                         ("maintenance-plan", "Assess recovery preparation"),
                         ("maintenance-recover", "Recover lifecycle metadata")])
-    if not blocked and any(row["state"] == "ready" for row in rows):
+    if not blocked and allowed["maintenance-register"]:
         choices.append(("maintenance-register", "Enroll eligible instance (no upgrade)"))
     labels = {"resume": "Resume installation", "status": "Instance status",
               "upgrade": "Native upgrade assistant",
               "verify": "Verify instance", "backup": "Back up database/configuration",
               "restore": "Restore database/configuration", "add-user": "Create non-admin user",
               "remove": "Uninstall instance",
+              "update-jails": "Update jail ports packages",
+              "update-vm": "Update office VM packages",
               "recover-install": "Recover unpublished initialization"}
     choices += [(action, labels[action]) for action in labels if allowed[action] and (not blocked or action == "status")]
     if view["pending_network"]:
         choices.append(("recover-network", "Recover interrupted network transition"))
     if getattr(ui, "dialog", None):
-        summary = f"Registered instances: {len(rows)}. Shared policy: {view.get('host_policy', 'unknown')}.\n"
-        summary += "Advisory view; live health is not checked.\n" + "\n".join(
-            f"{row['instance']}: {row['state']}" for row in rows[:3])
+        summary = render(view, compact=True)
         if blocked:
             summary += "\nATTENTION: registry/network inspection requires recovery."
         choice = ui.menu("NextcloudOnFreeBSD", choices, text=summary,
-                         help_text="Install creates a fresh instance. Configure saves without provisioning.\n"
+                         help_text="Use the package update actions to review current changes. Nothing is checked on open.\n"
                          "Uninstall retains application datasets by default; it is not a migration interface.\n"
                          "Status and reports are advisory; commands retain their existing safety checks.")
     else:
@@ -1081,13 +1113,13 @@ def menu(ui, registry, *, view=None):
                 raise ValueError("Invalid instance name")
             args.recovery_only, args.target, args.save, args.json = True, None, False, False
         if args.action == "register":
-            ready = [row for row in rows if row["state"] == "ready"]
+            ready = allowed["maintenance-register"]
             args.instance = ui.menu("Select instance for explicit enrollment",
                                     [(row["instance"], row["instance"]) for row in ready])
             if args.instance not in {row["instance"] for row in ready}:
                 raise ValueError("Unavailable enrollment instance")
         return args
-    if choice in ("install", "configure", "list", "recover-network"):
+    if choice in ("install", "configure", "list", "recover-network", "self-update"):
         return args
     if choice in ("check-updates", "check-security"):
         args.instance, args.all, args.json = None, False, False

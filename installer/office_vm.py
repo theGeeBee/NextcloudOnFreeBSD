@@ -32,6 +32,7 @@ from .operations import _public_key as _normalize_public_key
 
 VM_RC_CONFIG = Path('/etc/rc.conf.d/vm')
 VM_RC_DIRECTORY = Path('/usr/local/etc/rc.d')
+VM_COMMAND = ('/usr/bin/env', 'rc_force=YES', '/usr/local/sbin/vm')
 _LOCAL_DOCKER = ('/usr/bin/env','-i','PATH=/sbin:/bin:/usr/sbin:/usr/bin','HOME=/root',
                  '/usr/bin/docker','--host=unix:///var/run/docker.sock')
 
@@ -344,44 +345,82 @@ def _vm_output(runner, *args, deadline=None):
     timeout = 10 if deadline is None else min(10, deadline - time.monotonic())
     if timeout <= 0:
         raise RuntimeError("Owned VM operation deadline expired")
-    result = runner.run(*args, hide_output=True, timeout=timeout)
+    command = (*VM_COMMAND, *args[1:]) if args[0] == 'vm' else args
+    result = runner.run(*command, hide_output=True, timeout=timeout)
     if result.returncode != 0 or not isinstance(result.stdout, str):
         raise ValueError("VM inspection command did not complete")
     return result.stdout.strip()
 
 
 def _vm_rc_context(runner, *, deadline=None):
-    """Refuse later service-specific overrides before invoking vm-bhyve.
-
-    FreeBSD15.1 load_rc_config reads /etc and every local_startup rc.conf.d/vm
-    location. Reading just our /etc file does not establish the effective manager.
-    Do not source arbitrary shell configuration to discover it.
-    """
-    result=[]
-    for value in _vm_output(runner,'sysrc','-n','local_startup',deadline=deadline).split():
-        if re.search(r'[$`*?(){}\[\]]',value):
-            raise ValueError('Dynamic/glob rc startup paths require explicit host configuration review')
-        directory=Path(_absolute_path(value))
-        if directory in result: raise ValueError('Ambiguous local rc startup directories')
-        result.append(directory)
-        base=directory.parent if directory.name=='rc.d' else directory
-        override=base/'rc.conf.d/vm'
-        if override!=VM_RC_CONFIG and (override.exists() or override.is_symlink()):
-            raise ValueError('Foreign service-specific VM rc override exists; no automatic adoption')
-    return tuple(result)
+    return tuple(Path(value) for value in
+                 _vm_output(runner,'sysrc','-n','local_startup',deadline=deadline).split())
 
 
 def _vm_rc_text(paths):
-    return 'vm_enable="YES"\nvm_dir="'+paths['manager_root']+'"\nvm_list=""\n'
+    return 'vm_dir="'+paths['manager_root']+'"\n'
 
 
-def _vm_list(text):
+def _vm_rc_value(runner, key, *, deadline=None):
+    timeout = 10 if deadline is None else min(10, deadline - time.monotonic())
+    if timeout <= 0:
+        raise RuntimeError("Owned VM operation deadline expired")
+    result = runner.run('sysrc', '-s', 'vm', '-n', key, check=False, hide_output=True, timeout=timeout)
+    if result.returncode not in (0, 1) or not isinstance(result.stdout, str):
+        raise ValueError("Could not inspect effective vm-bhyve service settings")
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _vm_manager_root(runner, *, deadline=None):
+    setting = _vm_rc_value(runner, 'vm_dir', deadline=deadline)
+    if not setting:
+        return None
+    if setting.startswith('zfs:'):
+        dataset = setting.removeprefix('zfs:')
+        if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_./:%-]*', dataset):
+            raise ValueError('Invalid vm-bhyve default ZFS dataset')
+        if _vm_output(runner,'zfs','get','-Hp','-o','value','mounted',dataset,deadline=deadline) != 'yes':
+            raise ValueError('The vm-bhyve default ZFS dataset is not mounted')
+        setting = _vm_output(runner,'zfs','get','-Hp','-o','value','mountpoint',dataset,deadline=deadline)
+    return Path(_absolute_path(setting)).resolve(strict=True)
+
+
+def _check_vm_manager_files(manager):
+    # Ordinary vm commands otherwise mkdir/touch or migrate missing files.
+    # Leave an incomplete administrator manager for its administrator to initialize.
+    from .operations import _directories
+    owners = {0, os.geteuid()}
+    for name in ('.config', '.templates', '.iso', '.img'):
+        _directories(manager / name, owners=owners)
+    for name in ('null.iso', 'system.conf'):
+        path = manager / '.config' / name
+        info = path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid not in owners
+                or info.st_mode & 0o022 or info.st_nlink != 1):
+            raise ValueError('Unsafe vm-bhyve manager file: ' + str(path))
+
+
+def _check_vm_manager_setup(runner):
+    manager = _vm_manager_root(runner)
+    if manager is not None:
+        _check_vm_manager_files(manager)
+    elif (VM_RC_CONFIG.exists() or VM_RC_CONFIG.is_symlink()
+          or _vm_rc_value(runner, 'vm_enable').upper() in ('YES', 'TRUE', 'ON', '1')):
+        raise ValueError('Set a valid vm_dir in the existing vm-bhyve service configuration')
+    return manager
+
+
+def _vm_list(text, *, name=None, datastore=None):
     lines = text.splitlines()
     if not lines or lines[0].split() != ["NAME", "DATASTORE", "LOADER", "CPU", "MEMORY", "VNC", "AUTO", "STATE"]:
         raise ValueError("Unsupported vm-bhyve list format")
     result = {}
     for line in lines[1:]:
         fields = line.split()
+        # Unrelated guest states (and even duplicate foreign names) do not
+        # affect resolution of our name or exclusive use of our datastore.
+        if name is not None and len(fields) >= 2 and fields[0] != name and fields[1] != datastore:
+            continue
         if len(fields) < 8 or fields[0] in result:
             raise ValueError("Ambiguous VM manager inventory")
         index = 7
@@ -405,10 +444,11 @@ def _vm_datastores(text):
         raise ValueError("Unsupported VM datastore inventory")
     result = {}
     for line in lines[1:]:
-        fields = line.split()
-        if len(fields) != 4 or fields[0] in result or not Path(fields[2]).is_absolute():
+        fields = line.split(None, 2)
+        if len(fields) != 3 or fields[0] in result:
             raise ValueError("Ambiguous VM datastore inventory")
-        result[fields[0]] = tuple(fields[1:])
+        directory, _, dataset = fields[2].rpartition(" ")
+        result[fields[0]] = (fields[1], directory.rstrip(), dataset)
     return result
 
 
@@ -528,31 +568,53 @@ def _vm_manager_package_identity(deployment, *, deadline=None):
 
 
 def _vm_manager_identity(deployment, paths, *, deadline=None):
-    d = deployment
-    def out(*args): return _vm_output(d.runner, *args, deadline=deadline)
-    # vm-bhyve1.7.5 vm-base can mkdir/touch even for list, and its config loader
-    # migrates a missing system.conf. Inspect only an already initialized manager.
-    # Do not let verification/list/stop silently repair missing manager state.
-    manager=Path(paths['manager_root'])
-    for name in ('.config','.templates','.iso','.img'):
-        path=manager/name
-        info=path.lstat()
-        if (not stat.S_ISDIR(info.st_mode) or info.st_uid!=os.geteuid() or info.st_mode & 0o022
-                or path.resolve(strict=True)!=path):
-            raise ValueError('VM manager state is missing or unsafe; explicit setup/recovery required')
-    for name in ('null.iso','system.conf'):
-        path=manager/'.config'/name
-        info=path.lstat()
-        if (not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid() or info.st_mode & 0o022
-                or info.st_nlink!=1 or info.st_size>1024**2):
-            raise ValueError('VM manager native initialization files changed')
-    _key_file_identity(VM_RC_CONFIG)
-    if VM_RC_CONFIG.resolve(strict=True)!=VM_RC_CONFIG or VM_RC_CONFIG.read_text()!=_vm_rc_text(paths):
-        raise ValueError('VM manager startup settings changed; vm_list must remain empty')
-    _vm_manager_package_identity(d, deadline=deadline)
-    if out("sysrc", "-nqf", str(VM_RC_CONFIG), "vm_dir") not in (paths["manager_root"], "zfs:" + paths["manager_dataset"]):
-        raise ValueError("Refusing a foreign VM manager directory")
-    _vm_rc_context(d.runner, deadline=deadline)
+    _vm_manager_package_identity(deployment, deadline=deadline)
+    manager = _vm_manager_root(deployment.runner, deadline=deadline)
+    if manager is None:
+        raise ValueError('No effective vm-bhyve manager is configured')
+    _check_vm_manager_files(manager)
+    return manager
+
+
+def _manager_datastores(runner, manager, *, deadline=None):
+    stores = _vm_datastores(_vm_output(runner, 'vm', 'datastore', 'list', deadline=deadline))
+    if 'default' not in stores or Path(stores['default'][1]).resolve() != manager:
+        raise ValueError('vm-bhyve resolved a different default manager directory')
+    return stores
+
+
+def _vm_manager_setting(runner, manager, key):
+    result = runner.run('sysrc', '-nqf', str(manager / '.config/system.conf'), key,
+                        check=False, hide_output=True, timeout=10)
+    if result.returncode not in (0, 1) or not isinstance(result.stdout, str):
+        raise ValueError('Could not inspect vm-bhyve manager setting: ' + key)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _check_vm_store_paths(stores, paths):
+    mount = Path(paths['mountpoint'])
+    for name, (_, directory, _) in stores.items():
+        if not directory:
+            continue  # Unmounted foreign ZFS datastore cannot resolve a live path.
+        path = Path(_absolute_path(directory)).resolve()
+        if name != paths['datastore'] and (path == mount or mount in path.parents):
+            raise ValueError('Another VM datastore overlaps the selected VM storage')
+
+
+def _vm_runtime_pids(runner, name, *, deadline=None):
+    # The exact bhyve process title is also the selector used by upstream stop.
+    timeout = 10 if deadline is None else min(10, deadline - time.monotonic())
+    if timeout <= 0:
+        raise RuntimeError('Owned VM operation deadline expired')
+    result = runner.run('/usr/bin/pgrep', '-fx', 'bhyve: ' + name, check=False,
+                        hide_output=True, timeout=timeout)
+    if result.returncode not in (0, 1):
+        raise ValueError('Could not inspect the selected bhyve runtime')
+    return result.stdout.split() if result.returncode == 0 else []
+
+
+def _vm_runtime_exists(runner, name, *, deadline=None):
+    return bool(_vm_runtime_pids(runner, name, deadline=deadline) or Path('/dev/vmm', name).exists())
 
 
 def native_vm_identity(deployment, *, deadline=None):
@@ -560,20 +622,21 @@ def native_vm_identity(deployment, *, deadline=None):
     paths, record = _vm_storage(deployment, deadline)
     d, c = deployment, deployment.config
     def out(*args): return _vm_output(d.runner, *args, deadline=deadline)
-    _vm_manager_identity(d,paths,deadline=deadline)
-    datastores = _vm_datastores(out("vm", "datastore", "list"))
-    if datastores.get('default')!=('directory',paths['manager_root'],'-'):
-        raise ValueError('Effective VM manager default datastore is foreign')
+    manager = _vm_manager_identity(d,paths,deadline=deadline)
+    datastores = _manager_datastores(d.runner, manager, deadline=deadline)
+    _check_vm_store_paths(datastores, paths)
     if datastores.get(paths["datastore"]) != ("directory", paths["mountpoint"], "-"):
         raise ValueError("VM datastore is missing, foreign or reallocated")
-    inventory = _vm_list(out("vm", "list"))
+    inventory = _vm_list(out("vm", "list"), name=paths['name'], datastore=paths['datastore'])
     row = inventory.get(paths["name"])
     if (row is None or row["datastore"] != paths["datastore"] or row["loader"] != "uefi"
             or row["cpu"] != str(c.office_vm_cpus) or row["memory"] != str(c.office_memory_mb) + "M"
             or row["vnc"] != "-" or any(name != paths["name"] and r["datastore"] == paths["datastore"]
                                         for name, r in inventory.items())):
         raise ValueError("Exact owned VM inventory identity changed")
-    return {**paths, "state": row["state"], "uuid": record["uuid"], "datastores": datastores}
+    if row['state'] == 'Stopped' and _vm_runtime_exists(d.runner, paths['name'], deadline=deadline):
+        raise ValueError('The selected VM name has an untracked bhyve runtime')
+    return {**paths, "manager": manager, "state": row["state"], "uuid": record["uuid"], "datastores": datastores}
 
 
 def stop_native_vm(deployment, *, timeout=60):
@@ -584,8 +647,19 @@ def stop_native_vm(deployment, *, timeout=60):
     deadline = time.monotonic() + timeout
     target = native_vm_identity(deployment, deadline=deadline)
     if target["state"] != "Stopped":
-        if not target["state"].startswith(("Running (", "Bootloader (")):
+        running = re.fullmatch(r'Running \(([1-9][0-9]*)\)', target['state'])
+        if not running:
             raise ValueError("VM state requires manual recovery; no stop attempted")
+        lock = Path(target['root']) / 'run.lock'
+        try:
+            info = lock.lstat()
+        except FileNotFoundError:
+            raise ValueError('The live bhyve process has no owned VM run lock') from None
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022
+                or info.st_nlink != 1 or info.st_size > 1024
+                or lock.read_text().strip() != _vm_output(deployment.runner, 'hostname', deadline=deadline)
+                or _vm_runtime_pids(deployment.runner, target['name'], deadline=deadline) != [running[1]]):
+            raise ValueError('The live bhyve process is not bound to the owned VM run lock')
         _vm_output(deployment.runner, "vm", "stop", target["name"], deadline=deadline)
     while True:
         current = native_vm_identity(deployment, deadline=deadline)
@@ -601,30 +675,21 @@ def detach_native_vm_datastore(deployment):
     """Normal removal unregisters ONLY this datastore; never use vm destroy."""
     deployment.registry._require_lock()
     paths,record = _vm_storage(deployment)
-    _vm_manager_identity(deployment,paths)
+    manager = _vm_manager_identity(deployment,paths)
     def detach_switch():
-        system=Path(paths['manager_root'])/'.config/system.conf'
-        result=deployment.runner.run('sysrc','-nqf',str(system),'switch_list',check=False,hide_output=True,timeout=10)
-        switches=result.stdout.split() if result.returncode==0 else []
-        if len(switches)!=len(set(switches)):
-            raise ValueError('Ambiguous VM switch inventory')
-        if paths['switch'] not in switches: return
-        kind=_vm_output(deployment.runner,'sysrc','-nqf',str(system),'type_'+paths['switch'])
-        bridge=_vm_output(deployment.runner,'sysrc','-nqf',str(system),'bridge_'+paths['switch'])
-        if kind!='manual' or bridge!=deployment.config.onlyoffice_bridge:
-            raise ValueError('VM switch is not the selected owned manual bridge')
+        if not _check_vm_switch(deployment, paths, manager):
+            return
         # vm-bhyve manual switch destruction unregisters the switch; it does not
         # destroy the host bridge. Existing owner-aware network removal does that.
         _vm_output(deployment.runner,'vm','switch','destroy',paths['switch'])
-    stores = _vm_datastores(_vm_output(deployment.runner,'vm','datastore','list'))
-    if stores.get('default')!=('directory',paths['manager_root'],'-'):
-        raise ValueError('Effective VM manager default datastore is foreign')
+    stores = _manager_datastores(deployment.runner, manager)
+    _check_vm_store_paths(stores, paths)
     if paths['datastore'] not in stores:
         # A crash may follow the successful native unregister but precede the
         # enclosing removal checkpoint. Retained, sealed storage plus no runtime
         # permits this read-only reconciliation, never guessed disk destruction.
-        inventory = _vm_list(_vm_output(deployment.runner,'vm','list'))
-        if (paths['name'] in inventory or Path('/dev/vmm',paths['name']).exists()
+        inventory = _vm_list(_vm_output(deployment.runner,'vm','list'), name=paths['name'])
+        if (paths['name'] in inventory or _vm_runtime_exists(deployment.runner, paths['name'])
                 or (Path(paths['root'])/'run.lock').exists()):
             raise ValueError('Unregistered VM still has a runtime or conflicting manager identity')
         detach_switch()
@@ -660,14 +725,10 @@ def _owned_vm_dataset(runner, dataset, mountpoint, owner):
 
 
 def initialize_native_vm_manager(deployment):
-    """Initialize only an owned shared manager, after confirmed network staging.
-
-    This is not a package installer: all host tools were selected/solver-checked
-    and installed by the existing prerequisite phase. No VM autostart is granted.
-    An intent in existing host.json protects a crash before the RC file is written.
-    """
+    """Reuse an initialized manager, or configure a project default without rc enablement."""
     from .host import verify_managed_network, write_private
-    from .state import atomic_json, private_json
+    from .operations import _directories
+    from .state import private_json
     d, c = deployment, deployment.config
     d.registry._require_lock()
     from .firewall import pending_transactions
@@ -681,44 +742,27 @@ def initialize_native_vm_manager(deployment):
         raise ValueError('VM instance network has not been confirmed')
     if VM_RC_DIRECTORY not in _vm_rc_context(d.runner):
         raise ValueError('VM rc startup directory is not enabled on this host')
-    guid = _owned_vm_dataset(d.runner,paths['manager_dataset'],paths['manager_root'],'shared')
     _vm_manager_package_identity(d)
-    rc = _vm_rc_text(paths)
-    marker = dict(dataset=paths['manager_dataset'],mountpoint=paths['manager_root'],guid=guid,
-                  rc_file=str(VM_RC_CONFIG),rc_sha256=hashlib.sha256(rc.encode()).hexdigest())
-    host = d.registry.host()
-    if not isinstance(host,dict):
-        raise ValueError('Managed host record is required before VM setup')
-    prior = host.get('vm_manager')
-    if prior is not None and prior != marker:
-        raise ValueError('Shared VM manager identity changed')
-    if VM_RC_CONFIG.parent.exists() or VM_RC_CONFIG.parent.is_symlink():
-        parent = VM_RC_CONFIG.parent.lstat()
-        if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.geteuid() or parent.st_mode & 0o022
-                or VM_RC_CONFIG.parent.resolve(strict=True) != VM_RC_CONFIG.parent):
-            raise ValueError('VM RC parent directory is not an owned canonical configuration directory')
-    exists = VM_RC_CONFIG.exists() or VM_RC_CONFIG.is_symlink()
-    if prior is None or not exists:
-        for field in ('vm_dir','vm_enable'):
-            result = d.runner.run('sysrc','-n',field,check=False,hide_output=True,timeout=10)
-            if result.returncode == 0:
-                raise ValueError('Refusing an administrator-managed VM configuration')
-        if exists:
-            raise ValueError('Refusing an unowned VM RC file')
-    if exists:
-        _key_file_identity(VM_RC_CONFIG)
-        if VM_RC_CONFIG.read_text() != rc:
-            raise ValueError('Owned VM RC configuration changed')
-    if prior is None:
-        atomic_json(d.registry.root/'host.json',{**host,'vm_manager':marker})
-    if not exists:
-        VM_RC_CONFIG.parent.mkdir(exist_ok=True)
-        write_private(VM_RC_CONFIG,rc)
-    _vm_output(d.runner,'vm','init')
-    datastores = _vm_datastores(_vm_output(d.runner,'vm','datastore','list'))
-    if datastores.get('default') != ('directory',paths['manager_root'],'-'):
-        raise ValueError('VM default datastore is not the owned shared manager')
-    return paths
+    manager = _check_vm_manager_setup(d.runner)
+    if manager is not None:
+        return manager
+    _owned_vm_dataset(d.runner,paths['manager_dataset'],paths['manager_root'],'shared')
+    manager = Path(paths['manager_root'])
+    for name in ('.config', '.templates', '.iso', '.img'):
+        (manager / name).mkdir(mode=0o700, exist_ok=True)
+        _directories(manager / name, owners={0, os.geteuid()})
+    for name in ('null.iso', 'system.conf'):
+        path = manager / '.config' / name
+        if not path.exists():
+            write_private(path, '')
+    _check_vm_manager_files(manager)
+    _directories(VM_RC_CONFIG.parent.parent, owners={0, os.geteuid()})
+    VM_RC_CONFIG.parent.mkdir(exist_ok=True)
+    _directories(VM_RC_CONFIG.parent, owners={0, os.geteuid()})
+    write_private(VM_RC_CONFIG, _vm_rc_text(paths))
+    if _vm_manager_root(d.runner) != manager:
+        raise ValueError('New vm_dir is not the effective vm-bhyve manager setting')
+    return manager
 
 
 def create_native_vm(deployment, image_path):
@@ -772,16 +816,23 @@ def create_native_vm(deployment, image_path):
             raise ValueError('VM creation intent changed')
     from .host import check_vm_disk_capacity
     check_vm_disk_capacity(c, d.runner)
-    initialize_native_vm_manager(d)
+    manager = initialize_native_vm_manager(d)
     guid = _owned_vm_dataset(d.runner,paths['dataset'],paths['mountpoint'],c.instance)
-    stores = _vm_datastores(_vm_output(d.runner,'vm','datastore','list'))
+    stores = _manager_datastores(d.runner, manager)
+    _check_vm_store_paths(stores, paths)
     if paths['datastore'] in stores:
         if not existing_intent or stores[paths['datastore']] != ('directory',paths['mountpoint'],'-'):
             raise ValueError('Foreign VM datastore name collision')
-    if paths['name'] in _vm_list(_vm_output(d.runner,'vm','list')):
-        raise ValueError('VM name is already registered in another datastore')
+    elif (paths['datastore'] in _vm_manager_setting(d.runner, manager, 'datastore_list').split()
+          or _vm_manager_setting(d.runner, manager, 'path_' + paths['datastore'])):
+        raise ValueError('Incomplete settings occupy the selected VM datastore name')
+    if (paths['name'] in _vm_list(_vm_output(d.runner,'vm','list'), name=paths['name'])
+            or _vm_runtime_exists(d.runner, paths['name'])):
+        raise ValueError('VM name is already registered or running')
+    if _check_vm_switch(d, paths, manager):
+        raise ValueError('VM switch name already exists before creation')
     mac = '02:' + ':'.join(hashlib.sha256(c.instance.encode()).hexdigest()[i:i+2] for i in range(0,10,2))
-    template = Path(paths['manager_root'])/'.templates'/(paths['name']+'.conf')
+    template = manager/'.templates'/(paths['name']+'.conf')
     template_text = render_unaccepted_vm_config(c.instance,cpus=c.office_vm_cpus,memory_mb=c.office_memory_mb,
                                                disk_gib=c.office_vm_disk_gib,mac=mac)
     if template.exists() or template.is_symlink():
@@ -811,13 +862,19 @@ def create_native_vm(deployment, image_path):
         if target.exists() and target.read_text() != text:
             raise ValueError('Retained private VM seed changed')
         atomic_write(target,text)
-    atomic_write(template,template_text)
+    if not template.exists():
+        from .host import write_private
+        write_private(template, template_text)
+    template_identity = _key_file_identity(template)
     # Disk conversion can exceed a metadata-query timeout. The existing progress
     # runner owns/reaps this command group on cancellation rather than leaving an
     # orphan qemu-img writer behind an uncertain creation intent.
-    d.runner.run('vm','create','-d',paths['datastore'],'-t',paths['name'],'-s',str(c.office_vm_disk_gib)+'G',
+    d.runner.run(*VM_COMMAND,'create','-d',paths['datastore'],'-t',paths['name'],'-s',str(c.office_vm_disk_gib)+'G',
                  '-i',str(source),'-C','-u',str(seed_dir/'user-data'),paths['name'],
                  hide_output=True,timeout=600,progress_label='Alpine VM disk import')
+    if _key_file_identity(template) != template_identity or template.read_text() != template_text:
+        raise ValueError('VM creation template changed during import; refusing to remove it')
+    template.unlink()
     root = Path(paths['root'])
     if (root/'seed.iso').exists() or (root/'seed.iso').is_symlink():
         raise ValueError('VM seed was already consumed; refusing seed replacement')
@@ -850,6 +907,24 @@ def create_native_vm(deployment, image_path):
                             'seed_sha256':_vm_seed_digest(root/'.cloud-init'),
                             'seed_iso_sha256':hashlib.sha256(iso.read_bytes()).hexdigest()})
     return native_vm_identity(d)
+
+
+def _check_vm_switch(deployment, paths, manager):
+    def query(key):
+        return _vm_manager_setting(deployment.runner, manager, key)
+    switches = query('switch_list').split()
+    bridge = deployment.config.onlyoffice_bridge
+    selected = paths['switch']
+    if any(query('bridge_' + name) == bridge for name in switches if name != selected):
+        raise ValueError('Another VM switch uses the selected office bridge')
+    kind, configured_bridge = query('type_' + selected), query('bridge_' + selected)
+    if selected not in switches:
+        if kind or configured_bridge:
+            raise ValueError('Unregistered settings occupy the selected VM switch name')
+        return False
+    if switches.count(selected) != 1 or kind != 'manual' or configured_bridge != bridge:
+        raise ValueError('Refusing a foreign or NAT-managed VM switch')
+    return True
 
 
 def _vm_network_ready(deployment, target):
@@ -932,17 +1007,12 @@ def start_native_vm(deployment, *, timeout=90, install_continuation=False):
         return target
     if target['state'] != 'Stopped':
         raise ValueError('VM startup state is uncertain; explicit recovery required')
-    system = Path(target['manager_root'])/'.config/system.conf'
-    query = d.runner.run('sysrc','-nqf',str(system),'switch_list',check=False,hide_output=True,timeout=10)
-    switches = query.stdout.split() if query.returncode == 0 else []
-    if target['switch'] in switches:
-        kind = _vm_output(d.runner,'sysrc','-nqf',str(system),'type_'+target['switch'])
-        bridge = _vm_output(d.runner,'sysrc','-nqf',str(system),'bridge_'+target['switch'])
-        if kind != 'manual' or bridge != d.config.onlyoffice_bridge:
-            raise ValueError('Refusing a foreign or NAT-managed VM switch')
-    else:
+    if not _check_vm_switch(d, target, target['manager']):
         _vm_output(d.runner,'vm','switch','create','-t','manual','-b',d.config.onlyoffice_bridge,target['switch'])
-    d.runner.run('vm','start',target['name'],hide_output=True,timeout=20,progress_label='Alpine VM startup')
+    for module in ('nmdm', 'if_tuntap'):
+        if d.runner.run('kldstat', '-qm', module, check=False, hide_output=True, timeout=10).returncode:
+            _vm_output(d.runner, 'kldload', module)
+    d.runner.run(*VM_COMMAND,'start',target['name'],hide_output=True,timeout=20,progress_label='Alpine VM startup')
     while time.monotonic()<deadline:
         current = native_vm_identity(d,deadline=deadline)
         if current['state'].startswith('Running ('):
@@ -1017,6 +1087,7 @@ def run_native_guest(deployment, args, *, input=None, timeout=60, check=True, re
 
     Mirrors the existing checked-jexec boundary, not a remote agent/library.
     Arguments are public operational data only; phase secrets use private stdin.
+    read_only requires already-pinned host trust; it does not restrict guest argv.
     """
     from .host import write_private
     d = deployment
@@ -1063,6 +1134,69 @@ def run_native_guest(deployment, args, *, input=None, timeout=60, check=True, re
     if check and result.returncode:
         raise RuntimeError('Private guest phase failed; retain protected guest diagnostics')
     return result
+
+
+# APK 3 can load .list files and CLI config in addition to /etc/apk/repositories.
+# Check the live branch just before each command without rewriting guest config.
+_APK_SAME_BRANCH = """import os, re, sys
+from pathlib import Path
+try:
+    release = re.fullmatch(r'([1-9][0-9]*\\.(?:0|[1-9][0-9]*))\\.[0-9]+', Path('/etc/alpine-release').read_text().strip())
+    if not release:
+        raise ValueError
+    def entries(path):
+        return [line.strip() for line in path.read_text().splitlines()
+                if line.strip() and not line.lstrip().startswith('#')]
+    for path in map(Path, ('/etc/apk/config', '/lib/apk/config')):
+        if path.exists() and entries(path):
+            raise ValueError
+    repos = entries(Path('/etc/apk/repositories'))
+    for directory in map(Path, ('/etc/apk/repositories.d', '/lib/apk/repositories.d')):
+        for path in directory.glob('*.list'):
+            repos.extend(entries(path))
+    allowed = {f'{scheme}://dl-cdn.alpinelinux.org/alpine/v{release[1]}/{group}'
+               for scheme in ('https', 'http') for group in ('main', 'community')}
+    if not repos or set(repos) - allowed:
+        raise ValueError
+except (OSError, ValueError):
+    sys.exit('Cannot establish the standard signed repositories for the live Alpine branch; no apk action was run.')
+os.execvpe('apk', ['apk', *sys.argv[1:]], {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin'})
+"""
+
+
+def update_vm_packages(deployment, ui):
+    """Attended approval of guest packages, without changing images or VM configuration."""
+    from .management import installed_guard
+
+    d, c = deployment, deployment.config
+    d.registry._require_lock()
+    if c.backend not in ("eurooffice", "collabora"):
+        raise ValueError("This instance has no supported Alpine office VM")
+    if d.registry.status(c.instance)["state"] != "ready" or installed_guard(d.registry, c) is None:
+        raise ValueError("VM package updates require a completed, ready v1.1 instance")
+    d.require_control_resolution()
+    command = ("/usr/bin/python3", "-I", "-B", "-c", _guest_python(_APK_SAME_BRANCH))
+    report = {"instance": c.instance, "state": "completed"}
+    for stage, args, timeout in (("Repository refresh", ("update",), 120),
+                                 ("Proposed package changes", ("--simulate", "upgrade"), 120),
+                                 ("Alpine package upgrade", ("upgrade",), 900)):
+        if args == ("upgrade",) and not ui.confirm(
+                "Apply apk upgrades in the office VM now? The preview is informative, not a locked transaction. "
+                "Packages and hooks may affect Docker or other services; save and close office documents first."):
+            report["state"] = "cancelled"
+            ui.message("Cancelled. No VM package upgrade was started.")
+            return report
+        # Require the original pinned trust file even during guest mutations.
+        result = run_native_guest(d, (*command, *args), timeout=timeout, check=False, read_only=True)
+        output = "\n".join(text.strip() for text in (result.stdout, result.stderr) if text and text.strip())
+        ui.details(stage, output or "apk returned no output.")
+        if result.returncode:
+            report.update(state="failed", stage=stage, exit_code=result.returncode)
+            ui.message(f"{stage} failed (exit {result.returncode}). Inspect apk output; no automatic retry.")
+            return report
+    ui.message("apk completed. Review its output and check guest services; a manual Docker restart or VM reboot "
+               "may be needed. The installer did not restart the VM or containers.")
+    return report
 
 
 def wait_native_guest(deployment, *, timeout=180):
@@ -1976,8 +2110,7 @@ def render_vm_boot_service(config, artifact_root, *, source_sha256):
 
     This function does not install the service; publish_vm_boot_service publishes
     it only after the required integration/restart/readiness checks.
-    vm-bhyve1.7.5 ignores prestart's return status. Leave its vm_list empty and
-    use an explicit rc command instead, after Bastille/network/VM initialization.
+    Use an explicit per-VM rc command, after the project's jail/network service.
     Moving/removing/changing the artifact fails closed; boot does not reselect.
     """
     vm_paths(config)
@@ -1988,7 +2121,7 @@ def render_vm_boot_service(config, artifact_root, *, source_sha256):
     clean='/usr/bin/env -i PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin '
     precheck=clean+shlex.join(['/usr/local/bin/python3','-I','-S','-B','-c',_BOOT_SOURCE_CHECK,root,source_sha256])
     command=clean+'/usr/local/bin/python3 -S -B -m installer.vm_boot'
-    return (f'#!/bin/sh\n# PROVIDE: {rcname}\n# REQUIRE: cloud_{config.instance}_jails vm\n# KEYWORD: shutdown\n'
+    return (f'#!/bin/sh\n# PROVIDE: {rcname}\n# REQUIRE: cloud_{config.instance}_jails\n# KEYWORD: shutdown\n'
             '. /etc/rc.subr\n'
             f'name="{rcname}"\nrcvar="{rcname}_enable"\n'
             f'load_rc_config "$name"\n: ${{{rcname}_enable:=NO}}\n'

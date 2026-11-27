@@ -345,16 +345,14 @@ def validate(config, discovered, nextcloud, onlyoffice=None, *, policy=None):
         if extension is None:
             raise ValueError(f"Required PHP extension {name} is unavailable in the selected repository; no package substitution is permitted")
         dependency = extension["dependencies"].get(roles["php"])
-        matching = (isinstance(dependency, dict)
-                     and dependency.get("origin") == expected_php["origin"]
-                     if current else dependency == expected_php)
+        matching = dependency == expected_php
         if not matching:
             raise ValueError(f"PHP extension {name} lacks a matching runtime dependency; flavor compatibility cannot be established")
         origin = profile.get("extension_origins", {}).get(template)
         if origin is not None and extension["origin"] != origin:
             raise ValueError(f"Wrong-origin PHP extension {name}; expected {origin}")
         bounds = profile["extension_ranges"].get(template)
-        if not current and bounds is not None and not in_range(extension["version"], bounds):
+        if bounds is not None and not in_range(extension["version"], bounds):
             raise ValueError(f"PHP extension {name} is outside its reviewed compatibility range")
     fresh = services.native_occ(discovered)
     connector = None if none or fresh else _connector(discovered, profile, nextcloud, packages[roles["php"]]["version"], effective.get("version_families"))

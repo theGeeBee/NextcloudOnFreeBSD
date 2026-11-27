@@ -621,9 +621,6 @@ def _check_interface_routes(c, facts, allowed, runner):
     uplink_addresses = re.findall(r"\binet\s+([0-9.]+)", info)
     if c.ingress_address not in uplink_addresses:
         raise ValueError("Ingress IPv4 address is not assigned to the selected uplink")
-    interface_config = runner.run("sysrc", "-n", "ifconfig_" + c.external_interface, check=False).stdout or ""
-    if "DHCP" in interface_config.upper():
-        raise ValueError("Configure a static uplink IPv4 address before installing jails")
     interface = None
     for line in runner.output("ifconfig", "-a", "inet").splitlines():
         match = re.match(r"^(\S+):", line)
@@ -1059,10 +1056,6 @@ def _check_ingress(c, runner):
                                  "correct the reservation, then Recheck; no service will be rebound.")
 
 
-def _check_dns(c):
-    """Retained call seam: public DNS is operator-managed, not host admission."""
-
-
 def check_vm_disk_capacity(config, runner):
     """Admission against effective current ZFS headroom, not a reservation."""
     from .office_vm import vm_paths
@@ -1078,7 +1071,7 @@ def preflight_vm(config, facts, runner, *, registry, resume=False):
     if config.backend not in ('eurooffice','collabora'):
         return
     from .versions import vm_resource_policy
-    from .office_vm import vm_paths, VM_RC_CONFIG, VM_RC_DIRECTORY, _vm_rc_context, _vm_rc_text
+    from .office_vm import VM_RC_DIRECTORY, _vm_rc_context, _check_vm_manager_setup
     minimum=vm_resource_policy(config)['minimum']
     if (config.office_vm_cpus<minimum['cpus'] or config.office_memory_mb<minimum['memory_mb']
             or config.office_vm_disk_gib<minimum['disk_gib']):
@@ -1099,34 +1092,9 @@ def preflight_vm(config, facts, runner, *, registry, resume=False):
     required='/dev/vmmctl' if loaded else '/boot/kernel/vmm.ko'
     if runner.run('/bin/test','-e',required,check=False).returncode:
         raise ValueError('Reviewed FreeBSD VMM control device/module is unavailable')
-    paths=vm_paths(config)
     if VM_RC_DIRECTORY not in _vm_rc_context(runner):
         raise ValueError('VM rc startup directory is not enabled on this host')
-    marker=(registry.host() or {}).get('vm_manager')
-    configured=runner.run('sysrc','-n','vm_dir',check=False,hide_output=True)
-    enabled=runner.run('sysrc','-n','vm_enable',check=False,hide_output=True)
-    if marker is None and (configured.returncode==0 or enabled.returncode==0 or VM_RC_CONFIG.exists() or VM_RC_CONFIG.is_symlink()):
-        raise ValueError('Refusing a foreign vm-bhyve manager configuration')
-    if marker is not None:
-        rc=_vm_rc_text(paths)
-        import hashlib
-        expected={'dataset':paths['manager_dataset'],'mountpoint':paths['manager_root'],
-                  'rc_file':str(VM_RC_CONFIG),'rc_sha256':hashlib.sha256(rc.encode()).hexdigest()}
-        if (not isinstance(marker,dict) or set(marker)!=set(expected)|{'guid'}
-                or any(marker.get(key)!=value for key,value in expected.items())
-                or not isinstance(marker.get('guid'),str) or not re.fullmatch(r'[1-9][0-9]{0,19}',marker['guid'])):
-            raise ValueError('Shared VM manager ownership record differs from this host')
-        if configured.returncode==0 or enabled.returncode==0:
-            raise ValueError('Global VM configuration overrides the owned manager RC file')
-        if VM_RC_CONFIG.exists() or VM_RC_CONFIG.is_symlink():
-            if read_private(VM_RC_CONFIG)!=rc:
-                raise ValueError('Owned VM manager RC settings changed')
-        elif not resume:
-            raise ValueError('Owned VM manager RC file is missing; explicitly resume its setup')
-        for prop,value in (('guid',marker['guid']),('mountpoint',paths['manager_root']),
-                           ('mounted','yes'),('org.cloud-installer:instance','shared')):
-            if runner.output('zfs','get','-Hp','-o','value',prop,paths['manager_dataset'])!=value:
-                raise ValueError('Shared VM manager dataset identity changed')
+    _check_vm_manager_setup(runner)
 
 
 def preflight(config, facts, runner, *, registry=None, resume=False):

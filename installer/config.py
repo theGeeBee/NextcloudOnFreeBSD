@@ -20,6 +20,9 @@ COMPREHENSIVE_FONT_ESTIMATE = (
 )
 
 
+DHCP_NOTICE = ("If the uplink uses DHCP, reserve its address. A lease address change can "
+               "break public access, forwarding and service connectivity.")
+
 PLUGIN_CHOICES = (
     ("highlightcode", "Highlight code", "code highlighting"),
     ("mendeley", "Mendeley", "external bibliography service; account/API setup"),
@@ -845,10 +848,16 @@ class Config:
         return json.dumps(self.to_dict(), indent=2) + "\n"
 
     @classmethod
-    def from_json(cls, text):
+    def from_json(cls, text, *, recipe=False):
         value = json.loads(text)
         if not isinstance(value, dict) or set(value) - {field.name for field in fields(cls)}:
             raise ValueError("Unknown configuration fields (secrets belong in the separate secret file)")
+        if recipe:
+            # Order is presentation for new recipes, but part of the canonical
+            # contract for saved configurations. Never deduplicate here.
+            for key in ("nextcloud_apps", "additional_nextcloud_apps", "onlyoffice_plugins"):
+                if isinstance(value.get(key), str):
+                    value[key] = ",".join(sorted(value[key].split(",")))
         backend = value.get("office_backend", "") or "onlyoffice"
         if backend not in ("eurooffice", "collabora") and any(key in value for key in ("office_vm_cpus", "office_vm_disk_gib")):
             raise ValueError("VM CPU/disk recipe fields apply only to VM office backends")
@@ -959,6 +968,7 @@ def deployment_plan(config):
                 if c.nextcloud_defaults else []),
              f"HTTPS: {c.tls_mode}; package branch: {c.repository}",
              f"Ingress: {c.external_interface} {c.ingress_address} ports {c.ingress_ports} -> isolated instance jails",
+             DHCP_NOTICE,
              dns,
              f"SSH management requirement: {c.management_network} -> host TCP {c.management_port}; host policy remains administrator-owned",
              "IPv6: denied on project bridges; unrelated host IPv6 policy remains administrator-owned",

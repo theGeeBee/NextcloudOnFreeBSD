@@ -191,7 +191,7 @@ def _shutdown_nextcloud(deployment):
         raise RuntimeError("Nextcloud/database shutdown unconfirmed; roots/data retained; inspect privately before retry") from None
 
 
-def _cleanup_owned_config(deployment):
+def _cleanup_owned_config(deployment, guard_sha256=None):
     from . import service_deadlines
     from .config import datasets
     from .network import storage_guard
@@ -204,7 +204,7 @@ def _cleanup_owned_config(deployment):
             from .office_vm import cleanup_vm_boot_service
             cleanup_vm_boot_service(deployment, journal=journal)
         path = Path(service_deadlines.GUARD_DIRECTORY) / (c.instance + "-storage-guard")
-        digest = hashlib.sha256(storage_guard(c, datasets(c), deployment.registry.root).encode()).hexdigest()
+        digest = guard_sha256 or hashlib.sha256(storage_guard(c, datasets(c), deployment.registry.root).encode()).hexdigest()
         # attach_storage publishes this private executable as 0700; rc hooks
         # are 0755, but must not dictate the storage guard's different contract.
         _remove_owned_file(journal, "storage_guard", path, digest, mode=0o700)
@@ -428,9 +428,16 @@ def remove_instance(deployment, *, purge_data=False, confirmation):
     if confirmation != phrase:
         raise ValueError("Instance removal requires the exact typed confirmation")
     previous = registry.status(c.instance)
+    from .management import installed_guard
+    guard_sha256 = installed_guard(registry, c)
+    if guard_sha256 is not None:
+        from .service_deadlines import GUARD_DIRECTORY
+        path = Path(GUARD_DIRECTORY) / (c.instance + "-storage-guard")
+        if _owned_file(path, digest=guard_sha256, mode=0o700) is None and previous["state"] == "ready":
+            raise ValueError("Installed storage guard is missing")
     if previous["state"] == "removed" and (not purge_data or previous.get("data_retained") is False):
         _runtime_removed(deployment, previous)
-        _cleanup_owned_config(deployment)
+        _cleanup_owned_config(deployment, guard_sha256)
         return _removal_summary(deployment, previous.get("data_retained", True))
     journal = Journal(deployment.state / ("purge.json" if purge_data else "removal.json"), c, deployment.progress)
     retained_flag = journal.data.get("runtime_already_removed", False)
@@ -497,7 +504,8 @@ def remove_instance(deployment, *, purge_data=False, confirmation):
                     journal.save()  # An interrupted active stop must never imply clean retention.
                     journal.data["database_shutdown"] = _shutdown_nextcloud(deployment)
                     journal.save()
-                run_jail_action(runner, "stop", name, deployment=deployment, capture=False)
+                run_jail_action(runner, "stop", name, deployment=deployment, capture=False,
+                                removal_guard=guard_sha256)
             expected_jid = current["jid"] if current else None
             after = _kernel_jail(runner, name, deployment.jail_root(name))
             if after is not None:
@@ -590,10 +598,11 @@ def remove_instance(deployment, *, purge_data=False, confirmation):
         RUNTIME_STEPS, (stop, withdraw_network, destroy_roots, clean_bridges)))
     # Separate journal preserves the historical meaning of RUNTIME_STEPS and
     # still reconciles cleanup after legacy completed removal / data-only retry.
-    steps.append((CONFIG_CLEANUP_STEP, lambda: _cleanup_owned_config(deployment)))
+    cleanup = lambda: _cleanup_owned_config(deployment, guard_sha256)
+    steps.append((CONFIG_CLEANUP_STEP, cleanup))
     if purge_data:
         steps.append(("permanently destroy instance data and snapshots", purge))
-    journal.run(steps, checks={CONFIG_CLEANUP_STEP: lambda: _cleanup_owned_config(deployment)})
+    journal.run(steps, checks={CONFIG_CLEANUP_STEP: cleanup})
     atomic_json(deployment.state / "removed.json", {"data_retained": not purge_data,
                 "dataset": c.dataset_root, "credentials_retained": True, "backups_retained": True})
     registry.set_status(c.instance, "removed", data_retained=not purge_data)

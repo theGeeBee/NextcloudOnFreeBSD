@@ -1281,6 +1281,7 @@ else:raise SystemExit('CODE endpoint readiness deadline expired')
 
     def verify(self):
         c = self.config
+        from .management import RECEIPT, installed_guard
         from .package_policy import repository_current
         from .service_runtime import verify_package_requirements
         for name in c.jails:
@@ -1299,8 +1300,14 @@ else:raise SystemExit('CODE endpoint readiness deadline expired')
             for name, record in self.versions["packages"]["host"].items():
                 if self.runner.output("pkg", "query", "%v|%o", name) != record["version"] + "|" + record["origin"]:
                     raise RuntimeError("Host prerequisites differ from the retained version lock; verification never changes them")
+        guard = f"/usr/local/libexec/{c.instance}-storage-guard"
+        if os.path.lexists(self.state / RECEIPT):
+            from .lifecycle import _owned_file
+            digest = installed_guard(self.registry, c)
+            if digest is not None and _owned_file(guard, digest=digest, mode=0o700) is None:
+                raise ValueError("Installed storage guard is missing")
         for name in c.jails:
-            self.runner.run(f"/usr/local/libexec/{c.instance}-storage-guard", name)
+            self.runner.run(guard, name)
         if c.native_office:
             self.wait_for_office()
             self.plugin_command("verify")
@@ -1559,6 +1566,9 @@ for path in ('cool/adminws','cool/getMetrics','cool/convert-to','browser/dist/ad
                                                                      'guest Docker bootstrap':self.check_office_vm_bootstrap,
                                                                      ('Collabora CODE container' if self.config.backend=='collabora' else 'Euro-Office container'):self.continue_vm_office} if vm else {})})
             self.checkpoint()
+            if self.config.has_native_services:
+                from .management import record_completed_install
+                record_completed_install(self)
             if vm:
                 atomic_write(self.state / "complete", COMPLETE_MESSAGE)
                 self.registry.set_status(self.config.instance, "ready")

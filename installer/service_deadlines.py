@@ -5,6 +5,7 @@ ownership guards and must contain a failed launch before further resource writes
 An unclosed host control persists a refusal, not permission to race containment.
 """
 
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -44,7 +45,7 @@ def _owned_text(path):
     return path.read_text()
 
 
-def qualify(deployment, name, *, prepared=True):
+def qualify(deployment, name, *, prepared=True, removal_guard=None):
     """Accept only the generated 1.4.4 thick bridge topology, not legacy hooks.
 
     This is additional to caller ownership/JID/ZFS checks, not a replacement.
@@ -115,7 +116,9 @@ def qualify(deployment, name, *, prepared=True):
         raise ValueError("Jail path/interface changed")
     if prepared:
         guard = Path(GUARD_DIRECTORY) / (c.instance + "-storage-guard")
-        if _owned_text(guard) != storage_guard(c, deployment.storage, deployment.registry.root):
+        text = _owned_text(guard)
+        if (hashlib.sha256(text.encode()).hexdigest() != removal_guard if removal_guard is not None
+                else text != storage_guard(c, deployment.storage, deployment.registry.root)):
             raise ValueError("Owned synchronous storage guard changed")
     # stop.sh scans ALL settings and recursively stops reverse dependencies; it
     # also writes a missing depend key. Refuse that collateral mutation topology.
@@ -192,7 +195,7 @@ def _control(argv, seconds, *, quiet):
 
 
 def run_jail_action(runner, action, name, *, deployment, verify_stopped=None,
-                    verify_running=None, prepared=True, **kwargs):
+                    verify_running=None, prepared=True, removal_guard=None, **kwargs):
     """Run only authorized public controls; capture=True suppresses, not captures.
 
     Restart callbacks accept (name, remaining_seconds), verify closure/live state,
@@ -203,16 +206,18 @@ def run_jail_action(runner, action, name, *, deployment, verify_stopped=None,
         raise ValueError("Unsupported jail action/runner")
     if type(prepared) is not bool or (not prepared and action != 'stop'):
         raise ValueError("Only the initial reserved stop may be unprepared")
+    if removal_guard is not None and (action != "stop" or not prepared):
+        raise ValueError("The installed guard digest qualifies only prepared removal stops")
     if set(kwargs) - {"capture", "check", "hide_output", "progress_label"}:
         raise ValueError("Jail controls accept no input or arbitrary deadline")
     if action == "restart" and (not callable(verify_stopped) or not callable(verify_running)):
         raise ValueError("Restart requires independent closure and live checks")
     require_resolved(deployment)
-    qualify(deployment, name, prepared=prepared)
+    qualify(deployment, name, prepared=prepared, removal_guard=removal_guard)
     deadline = time.monotonic() + JAIL_SECONDS[action]
 
     def execute(selected):
-        qualify(deployment, name, prepared=prepared)
+        qualify(deployment, name, prepared=prepared, removal_guard=removal_guard)
         remaining = min(JAIL_SECONDS[selected], deadline - time.monotonic())
         if remaining <= 0:
             raise ServiceControlError

@@ -93,10 +93,107 @@ def instance_names(registry):
     return names
 
 
+def _installer_version():
+    from .paths import PROJECT_ROOT
+    from .self_update import _version
+    try:
+        return _version(PROJECT_ROOT)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def _saved_plan(registry, name, *, lifecycle):
+    # Optional historical display data. Missing/corrupt plan evidence is not a
+    # live failure and must not hide unrelated actions or expose raw contents.
+    try:
+        # Enrolled evidence_path(..., "versions.json") can resolve a successor.
+        path = (registry._store().resolve(name)["evidence_path"] / "versions.json"
+                if lifecycle else registry.evidence_path(name, "versions.json"))
+        return _read(path, optional=True) or {}
+    except (OSError, ValueError, TypeError, KeyError):
+        return {}
+
+
+def _retained_actions(registry, config, row, path, *, lifecycle):
+    """Only offer actions whose static gates can be checked without live probes."""
+    if row["state"] != "ready" or not config.native_office or config.has_native_services:
+        return []
+    from types import SimpleNamespace
+    from .maintenance import entry_guard, require_instance_adapter
+    from .operations import _restore_journal
+
+    if row["pending"] not in ([], ["database restore"]):
+        return []
+    try:
+        if lifecycle:
+            entry_guard("backup", registry=registry)
+            require_instance_adapter(registry, config.instance)
+        restore = (_restore_journal(SimpleNamespace(config=config, state=path))
+                   if os.path.lexists(path / "restore.json") else None)
+    except (OSError, ValueError, TypeError, KeyError):
+        return []
+    if row["pending"] or restore and restore["state"] == "pending":
+        return ["restore"] if restore and restore["state"] == "pending" else []
+    return ["backup", "restore"] if lifecycle else ["backup", "restore", "upgrade"]
+
+
+def _enrollment_candidates(registry, rows, *, lifecycle):
+    """Screen the host and first-readiness evidence; CLI still verifies live state."""
+    from .deploy import source_digest
+    from .enrollment import ADAPTER, BASELINE, _bytes
+
+    try:
+        graph = registry._store().graph()["instances"] if lifecycle else {}
+        ready = [row for row in rows if row["state"] not in ("configured", "removed")]
+        # The CLI checks the original guard on every extant pair, not just the
+        # selected entry. Native services and interrupted installs cannot join.
+        if any(row["state"] != "ready" or row.get("service_profile")
+               or row["office_backend"] != "onlyoffice" for row in ready):
+            return set()
+        candidates = {}
+        for row in ready:
+            name = row["instance"]
+            if graph.get(name, {}).get("kind") == "managed" or row["pending"]:
+                continue
+            path = registry.instance_path(name)
+            if any(os.path.lexists(path / filename) for filename in (
+                    "enrollment-unavailable.json", "restore.json", "removal.json", "purge.json",
+                    "allow-start.initialization-recovery")) or any(path.glob("allow-start.enrollment-*")):
+                continue
+            try:
+                baseline = _read(path / BASELINE, optional=True)
+                bindings = ("source_sha256", "executor_sha256", "config_sha256", "versions_sha256", "inputs_sha256")
+                if (baseline and set(baseline) == {"schema", "adapter", "origin", "instance", "observation",
+                                                   "plugins_sha256", *bindings}
+                        and type(baseline["schema"]) is int and baseline["schema"] == 1 and baseline["adapter"] == ADAPTER
+                        and baseline.get("origin") == "first-install-readiness" and baseline.get("instance") == name
+                        and isinstance(baseline["observation"], dict)
+                        and all(isinstance(baseline[key], str) and re.fullmatch(r"[0-9a-f]{64}", baseline[key])
+                                for key in bindings)):
+                    candidates[name] = baseline["source_sha256"]
+            except (OSError, ValueError, TypeError):
+                continue
+        if candidates:
+            original = source_digest().encode()
+            for row in ready:
+                name = row["instance"]
+                if graph.get(name, {}).get("kind") != "managed":
+                    if _bytes(registry.evidence_path(name, "source.sha256")) != original:
+                        return set()
+            return {name for name, source in candidates.items() if source == original.decode().strip()}
+        return set()
+    except (OSError, ValueError, TypeError, KeyError):
+        return set()
+
+
 def snapshot(registry):
     """Return bounded public facts; incomplete/unsafe records remain visible."""
-    view = {"instances": [], "errors": [], "pending_network": [], "host_policy": "unknown"}
+    from .management import installed_guard
+
+    view = {"instances": [], "errors": [], "pending_network": [], "host_policy": "unknown",
+            "installer_version": _installer_version(), "self_update": False}
     try:
+        lifecycle = registry.lifecycle_enabled()
         names = instance_names(registry)
         if Path(registry.root).exists():
             host = _read(Path(registry.root) / "host.json", optional=True)
@@ -153,31 +250,78 @@ def snapshot(registry):
                     raise ValueError("Invalid recovery journal")
                 if recoveries and recoveries[-1].get("state") in ("running", "failed"):
                     row["pending"].append(label)
+            plan = _saved_plan(registry, name, lifecycle=lifecycle)
+            try:
+                row["managed_ready"] = (status["state"] == "ready" and not row["pending"]
+                                        and installed_guard(registry, config) is not None)
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                row["managed_ready"] = False
             # Detect common lock-free observation races. This is advisory; every
             # mutation still reloads state and resources while holding its lock.
             if original != _read(registry.evidence_path(name, "config.json")) or status != registry.status(name):
                 raise ValueError("Registry changed during inspection")
+            apps = plan.get("applications")
+            nextcloud = apps.get("nextcloud") if isinstance(apps, dict) else None
+            recorded = (nextcloud if isinstance(nextcloud, str)
+                        and re.fullmatch(r"[0-9]{1,8}(?:\.[0-9]{1,8}){2}", nextcloud) else None)
             row.update(state=status["state"], public_url=config.public_url,
-                       nextcloud_jail=config.nextcloud_jail, office_jail=config.onlyoffice_jail if config.native_office else None,
-                       recorded_release=config.release, state_updated=_time(status.get("updated")))
-            if not config.native_office:
-                row["office_backend"] = config.backend
+                        nextcloud_jail=config.nextcloud_jail, office_jail=config.onlyoffice_jail if config.native_office else None,
+                       recorded_release=config.release, state_updated=_time(status.get("updated")),
+                       office_backend=config.backend, recorded_nextcloud=recorded,
+                       legacy_advisory=bool(plan) and config.native_office and not config.has_native_services
+                       and not ({"app_installation", "package_installation", "services"} & plan.keys()))
             if config.has_native_services:
                 row.update(service_profile=config.service_profile, client_push=True,
                            talk_jail=config.talk_jail if config.talk else None)
             row["pending"] = sorted(set(row["pending"]))
+            row["actions"] = _retained_actions(registry, config, row, path, lifecycle=lifecycle)
         except (OSError, ValueError, TypeError, KeyError, AttributeError):
             # Never echo private JSON, raw exceptions or journals' error payloads.
             row["error"] = "Unsafe, changed or unsupported instance records; inspect privately"
         view["instances"].append(row)
+    blocked = bool(view["pending_network"] or any(row["error"] for row in view["instances"]))
+    view["self_update"] = not blocked and not lifecycle
+    candidates = _enrollment_candidates(registry, view["instances"], lifecycle=lifecycle) if not blocked else set()
+    for row in view["instances"]:
+        actions = [] if blocked else row.get("actions", [])
+        if row["instance"] in candidates:
+            actions.append("maintenance-register")
+        if not blocked and not lifecycle and row["state"] != "configured":
+            actions.append("remove")
+        if not blocked and not lifecycle and row.get("managed_ready"):
+            actions.append("update-jails")
+            if row["office_backend"] in ("eurooffice", "collabora"):
+                actions.append("update-vm")
+        row["actions"] = actions
     return view
 
 
-def render(view, *, host_release=None, updates=None):
-    lines = ["Managed host dashboard (advisory; no repair or update discovery)"]
+def render(view, *, host_release=None, updates=None, compact=False):
+    from .config import OFFICE_LABELS
+
+    version = view.get("installer_version")
+    lines = ["Installer: " + ("v" + version if version else "Unknown")]
+    if compact:
+        rows = view["instances"]
+        lines[0] += " | Live versions and updates: Not checked"
+        lines.append(f"{len(rows)} instances | Recorded Nextcloud / office / jail")
+        for row in rows[:3]:
+            line = f"{row['instance']}: {row['state']}"
+            if not row["error"]:
+                line += (f" | {row['recorded_nextcloud'] or 'Unknown'} | {row['office_backend']} "
+                         f"| {row['recorded_release']}")
+            lines.append(line)
+        if len(rows) > 3:
+            lines.append(f"{len(rows) - 3} more; choose List or Status.")
+        return "\n".join(lines)
+
+    lines.append("Managed host dashboard (advisory; no repair or update discovery)")
+    lines.append("Installer self-update: " + ("available on request" if view["self_update"] else "unavailable")
+                 + " | Latest stable installer: Not checked")
+    lines.append("Package availability: Not checked | Previous package update result: Unknown")
     if isinstance(host_release, str) and re.fullmatch(r"(?:[0-9]+\.[0-9]+-RELEASE(?:-p[0-9]+)?|15\.2-STABLE|16\.0-CURRENT)", host_release):
         lines.append("Host userland: " + host_release)
-    else:
+    elif host_release is not None:
         lines.append("Host userland: unknown")
     lines.append("Shared host policy: " + view["host_policy"])
     for error in view["errors"]:
@@ -198,6 +342,9 @@ def render(view, *, host_release=None, updates=None):
             lines.append(f"  {row['public_url']} | {row['nextcloud_jail']} | {row['office_backend']} dedicated VM (fresh-install only)")
         else:
             lines.append(f"  {row['public_url']} | {row['nextcloud_jail']} + dedicated {row['office_jail']}")
+        lines.append("  Office backend: " + OFFICE_LABELS[row["office_backend"]])
+        lines.append("  Originally selected Nextcloud: " + (row["recorded_nextcloud"] or "Unknown")
+                     + " | Live Nextcloud: Not checked")
         lines.append("  Recorded jail release: " + row["recorded_release"])
         if row.get("service_profile"):
             lines.append("  Native services: Client Push" +
@@ -207,9 +354,17 @@ def render(view, *, host_release=None, updates=None):
                      + (row["last_installation_check"] or "unknown") + " (historical)")
         if row["pending"]:
             lines.append("  ATTENTION: " + ", ".join(row["pending"]))
-        report = reports.get(row["instance"], {})
-        lines.append("  Updates: " + str(report.get("status", "unknown"))
-                     + " | freshness: " + str(report.get("freshness", "unknown"))
-                     + " | checked: " + str(report.get("checked_at") or "never"))
-    lines.append("Backend migration, post-install modification and shared DocumentServer are unsupported; native upgrade eligibility is checked separately.")
+        lines.append("  Maintenance actions: " + (", ".join(row.get("actions", ())) or "none offered"))
+        if row["legacy_advisory"]:
+            report = reports.get(row["instance"], {})
+            freshness = report.get("freshness")
+            if freshness == "stale":
+                note = "Stale (not evidence of current availability)"
+            elif freshness == "fresh" and _time(report.get("checked_at")):
+                note = str(report.get("status", "Unknown")) + " (cached)"
+            else:
+                note = "Unknown" if freshness == "unknown" else "Not checked"
+            lines.append("  Legacy advisory (recorded plan only): " + note
+                         + " | checked: " + (_time(report.get("checked_at")) or "never"))
+    lines.append("Actions are advisory; commands recheck eligibility and ownership when selected.")
     return "\n".join(lines)

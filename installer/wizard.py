@@ -766,6 +766,10 @@ def configure(facts, existing=None, registered=(), *, ui=None):
             else:
                 c.nextcloud_apps = value
         apps_selected_early = False
+        c.nextcloud_branding = ui.menu("Enable NextcloudOnFreeBSD branding", [
+            ("enabled", "Enabled"), ("disabled", "Disabled"),
+        ], "enabled" if c.nextcloud_branding else "disabled",
+            text="Disabled keeps Nextcloud's original branding.") == "enabled"
         if c.has_native_services:
             select_external_storage(c, ui=ui)
         if not c.native_office:
@@ -1073,7 +1077,8 @@ def configure(facts, existing=None, registered=(), *, ui=None):
             ui.message(validation_error)
         summary = (f"Setup 8/8 — Review. Configuration acceptance is not APPLY.\n"
                    f"Applications: {OFFICE_LABELS[c.backend]}; {len(c.selected_nextcloud_apps)} apps; "
-                   f"Talk {'on' if c.talk else 'off'}; Push {'on' if c.client_push else 'off'}\n"
+                   f"Talk {'on' if c.talk else 'off'}; Push {'on' if c.client_push else 'off'}; "
+                   f"Branding {'enabled' if c.nextcloud_branding else 'disabled'}\n"
                    f"Identity/software: {c.instance}; {c.public_hostname}; {c.repository}\n"
                    f"Storage: {c.pool}; {c.storage_policy or 'legacy'} quota policy\n"
                    f"Networking: {c.ingress_address}; {c.private_network}; management {c.management_network}:{c.management_port}\n"

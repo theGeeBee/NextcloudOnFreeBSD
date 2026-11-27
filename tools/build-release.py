@@ -136,7 +136,8 @@ def payload_files(root):
                 raise ValueError(f"Release payload must contain regular files: {relative}")
             files.append(path)
     required = {"install.sh", "LICENSE", "pyproject.toml", "installer/__init__.py", "installer/main.py",
-                   "installer/bastille.py", "installer/iocage.py",
+                   "installer/bastille.py", "installer/iocage.py", "installer/management.py", "installer/self_update.py",
+                   "installer/jail_updates.py",
                   "installer/dashboard.py", "installer/updates.py",
                   "installer/upgrade.py", "installer/upgrade_native.py", "installer/upgrade_packages.py",
                   "installer/upgrade_nextcloud.py", "installer/upgrade_backup.py",

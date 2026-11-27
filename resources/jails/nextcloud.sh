@@ -642,14 +642,25 @@ EOF
             archive="nextcloud-${version_nextcloud}.tar.bz2"
             fetch -o "$stage/$archive" "https://download.nextcloud.com/server/releases/$archive" < /dev/null
             fetch -o "$stage/$archive.asc" "https://download.nextcloud.com/server/releases/$archive.asc" < /dev/null
-            fetch -o "$stage/nextcloud.asc" https://nextcloud.com/nextcloud.asc < /dev/null
+            release_key=28806A878AE423A28372792ED75899B9A724937A
             mkdir -m 700 "$stage/gnupg"
-            gpg --homedir "$stage/gnupg" --batch --no-tty --import "$stage/nextcloud.asc" < /dev/null >/dev/null 2>&1
+            if fetch -T 20 -o "$stage/nextcloud.asc" https://nextcloud.com/nextcloud.asc < /dev/null; then
+                gpg --homedir "$stage/gnupg" --batch --no-tty --import "$stage/nextcloud.asc" \
+                    < /dev/null >/dev/null 2>&1 || fail 'Nextcloud release key import failed.'
+            else
+                printf '%s\n' 'Nextcloud release key download failed; trying keyserver.ubuntu.com over HTTPS.'
+                # The private jail has IPv4 egress only. Use the FreeBSD CA bundle
+                # for dirmngr's TLS validation without changing global GPG settings.
+                printf '%s\n' 'disable-ipv6' 'hkp-cacert /etc/ssl/cert.pem' > "$stage/gnupg/dirmngr.conf"
+                gpg --homedir "$stage/gnupg" --batch --no-tty --keyserver hkps://keyserver.ubuntu.com \
+                    --recv-keys "$release_key" < /dev/null >/dev/null 2> "$stage/keyserver.log" \
+                    || fail 'Nextcloud release key could not be retrieved from keyserver.ubuntu.com.'
+            fi
             gpg --homedir "$stage/gnupg" --batch --no-tty --status-fd 1 --verify "$stage/$archive.asc" "$stage/$archive" \
                 < /dev/null > "$stage/signature.status" 2> "$stage/signature.log" || fail 'Nextcloud archive signature verification failed.'
             # Pinned primary key; VALIDSIG's final field also identifies a primary
             # key when a signing subkey was used (nextcloud.com/install/).
-            awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" && ($3 == "28806A878AE423A28372792ED75899B9A724937A" || $12 == "28806A878AE423A28372792ED75899B9A724937A") { valid=1 } END { exit !valid }' \
+            awk -v key="$release_key" '$1 == "[GNUPG:]" && $2 == "VALIDSIG" && ($3 == key || $12 == key) { valid=1 } END { exit !valid }' \
                 "$stage/signature.status" || fail 'Archive was not signed by the pinned Nextcloud release key.'
             install -o root -g wheel -m 600 "$stage/$archive" "$release"
             sha256 -q "$release" > "$STATE/nextcloud-release.sha256.new"

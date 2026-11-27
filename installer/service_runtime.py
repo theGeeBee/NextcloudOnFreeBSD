@@ -718,7 +718,10 @@ def verify_services(deployment):
     if "app_installation" in deployment.versions:
         from .client_push import validate_selection
         from .host import read_private
-        deployment.require_original_artifact()
+        from .management import RECEIPT, installed_guard
+        if (not os.path.lexists(deployment.state / RECEIPT)
+                or installed_guard(deployment.registry, deployment.config) is None):
+            deployment.require_original_artifact()
         observed = observe_apps(deployment)
         selection = validate_selection(private_json(deployment.state / "push-native.json"),
             instance=deployment.config.instance,

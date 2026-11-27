@@ -28,6 +28,9 @@ Requires FreeBSD 15 or higher (amd64), using a supported release listed by the i
   resume INSTANCE              Review and resume a retained installation
   list                         List registered instances
   status INSTANCE              Show retained instance state
+  self-update [--rollback]     Select a verified installer release; instances unchanged
+  update-jails INSTANCE        Review and approve ports updates in owned jails
+  update-vm INSTANCE           Review and approve Alpine packages in an owned office VM
   check-updates [NAME|--all] [--refresh] [--save-report] [--json]
                                 Inspect update availability; never apply
   check-security [NAME|--all] [--refresh] [--save-report] [--json]
@@ -344,8 +347,6 @@ def checked_members(archive):
                  "resources/versions.json")}
     if not required.issubset(names) or any(not names[name].isfile() for name in required):
         raise ValueError("Archive is not a complete cloud-installer release")
-    if not any(name.startswith("cloud-installer/resources/") and item.isfile() for name, item in members):
-        raise ValueError("Release runtime resources are missing")
     for name, member in members:
         for parent in PurePosixPath(name).parents:
             if str(parent) in names and not names[str(parent)].isdir():
@@ -509,7 +510,19 @@ main() {
 			fi
 			;;
 		list|recover-network) [ "$#" -eq 1 ] || fail 'Unexpected command arguments.' ;;
-		plan|resume|status|verify|add-user|recover-install)
+		self-update)
+			[ "$#" -eq 1 ] || { [ "$#" -eq 2 ] && [ "$2" = --rollback ]; } \
+				|| fail 'Usage: self-update [--rollback]'
+			[ -z "$archive_source$archive_sha256" ] || fail 'Self-update selects its own official archive.'
+			;;
+		_stage-self-update)
+			[ "$#" -eq 1 ] && [ -n "$archive_source" ] || fail 'A release URL and checksum are required for staging.'
+			case "$archive_source" in
+				https://github.com/theGeeBee/NextcloudOnFreeBSD/releases/download/*) ;;
+				*) fail 'Self-update staging requires an official release URL.' ;;
+			esac
+			;;
+		plan|resume|status|verify|add-user|recover-install|update-jails|update-vm)
 			[ "$#" -eq 2 ] && [ -n "$2" ] || fail 'This command requires one file or instance.' ;;
 		resolve) [ "$#" -ge 2 ] && [ -n "$2" ] || fail 'Usage: resolve FILE [--metadata FILE] [--installed PLAN]' ;;
 		check-updates|check-security) : ;; # Python validates the inspection target and detailed flags.
@@ -557,7 +570,7 @@ main() {
 		*) usage >&2; fail 'Unknown command.' ;;
 	esac
 	case "$mode" in
-		resume|status|verify|add-user|recover-install|remove|backup|restore|upgrade)
+		resume|status|verify|add-user|recover-install|remove|backup|restore|upgrade|update-jails|update-vm)
 			require_instance_name "$2"
 			;;
 	esac
@@ -568,6 +581,10 @@ main() {
 		case "$mode" in
 			menu|list|status|check-updates|check-security|maintenance|upgrade|plan|resolve)
 				fail 'Menu, list, status, check-updates, check-security, maintenance, upgrade, plan and resolve require an already unpacked checkout/release; archive acquisition is unavailable for these commands.' ;;
+			update-jails)
+				fail 'Update-jails requires an already unpacked installer; archive acquisition is unavailable.' ;;
+			update-vm)
+				fail 'Update-vm requires an already unpacked installer; archive acquisition is unavailable.' ;;
 		esac
 	fi
 	if [ "$plain" -eq 1 ]; then
@@ -578,13 +595,11 @@ main() {
 	script_dir=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P) || fail 'Cannot locate the installer.'
 	case "$mode" in
 		resolve)
-			[ -z "$archive_source" ] || fail 'Version assessment requires an already unpacked artifact.'
 			for argument in "$@"; do
 				if [ "$argument" = --metadata ]; then launch_python "$@"; return; fi
 			done
 			;;
 		plan)
-			[ -z "$archive_source" ] || fail 'Offline planning requires an already unpacked checkout/release; no downloads are performed.'
 			launch_python "$@"
 			return
 			;;
@@ -627,7 +642,8 @@ main() {
 				require_python
 			fi
 			;;
-		remove|restore|add-user|recover-install|recover-network) require_terminal; require_python ;;
+		remove|restore|add-user|recover-install|recover-network|self-update|update-jails|update-vm) require_terminal; require_python ;;
+		_stage-self-update) require_python; bootstrap_archive; return ;;
 		upgrade) require_python ;; # Native host guards apply even to --plan; never bootstrap pkg/Python.
 		*) require_python ;;
 	esac

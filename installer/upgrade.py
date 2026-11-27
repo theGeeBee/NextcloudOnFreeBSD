@@ -204,7 +204,7 @@ def execute(target, selected, *, confirm):
         report["phase"] = step
         report["steps"].append(dict(step=step, state=state, details=details))
         atomic_json(directory / "report.json", report)
-    prior, closed, snapshot, stopped = {}, False, None, False
+    prior, closed, snapshot = {}, False, None
     web_services = _web_services(target)
     try:
         checkpoint("prepare", "started")
@@ -227,14 +227,12 @@ def execute(target, selected, *, confirm):
         _drain_php(target)
         _stop(target, DATA_SERVICES)
         _jails(target, "stop")
-        stopped = True
         checkpoint("maintenance", "complete")
         checkpoint("snapshot", "started")
         snapshot = upgrade_backup.create(target, directory / "snapshot")
         report["snapshot"] = snapshot
         checkpoint("snapshot", "complete")
         _jails(target, "start")
-        stopped = False
         _stop(target, web_services)
         _drain_php(target)
         _database_ready(target)
